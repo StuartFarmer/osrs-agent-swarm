@@ -8,6 +8,7 @@ Current checks (after review fixes):
 
 - Target Node 24.22.3 suite through tsx: 44 passing, 1 skipped, 0 failed.
 - Pi 0.84.2 and pinned upstream SDK imports now pass after operator installation.
+- The compatibility test now calls the live runtime preflight too. It caught and verifies the fix for Pi AI's unexported package manifest; preflight reads metadata relative to the resolved public entry point and still checks package identity/version.
 - The skipped ownership test needs a loopback listener, blocked here with EPERM.
 - Two live tests are explicitly skipped without their live flags/evidence.
 - TypeScript 5.9.3 check with installed dependencies passed.

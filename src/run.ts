@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { mkdir, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createRequire } from "node:module";
 import { identifier, loadProfile } from "./config.ts";
 import type { Experiment, Profile, AgentEntry, AgentKey } from "./types.ts";
 import { Store } from "./store.ts";
@@ -116,12 +116,18 @@ export async function reloadProfile(
 export function verifyRuntime(): void {
   if (process.versions.node.split(".")[0] !== "24")
     throw new Error("Node 24 required for live runs");
-  const require = createRequire(import.meta.url);
   for (const name of [
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
   ]) {
-    if (require(name + "/package.json").version !== "0.84.2")
+    // Both pinned packages export dist/index.js; pi-ai does not export its manifest.
+    const manifest = JSON.parse(
+      readFileSync(
+        new URL("../package.json", import.meta.resolve(name)),
+        "utf8",
+      ),
+    );
+    if (manifest.name !== name || manifest.version !== "0.84.2")
       throw new Error("Install pinned Pi 0.84.2 before live runs");
   }
 }

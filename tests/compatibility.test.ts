@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { verifyRuntime } from "../src/run.ts";
 
 test("pinned Pi and upstream SDK import under the required runtime", async () => {
   assert.equal(
@@ -7,6 +8,7 @@ test("pinned Pi and upstream SDK import under the required runtime", async () =>
     "24",
     "Install Node 24 before integration checks",
   );
+  assert.doesNotThrow(() => verifyRuntime());
   const { Agent } = await import("@earendil-works/pi-agent-core");
   const sdkPath = "../vendor/rs-sdk/sdk/index.ts";
   const actionsPath = "../vendor/rs-sdk/sdk/actions.ts";
