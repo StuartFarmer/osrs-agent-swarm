@@ -19,6 +19,7 @@ export type ContextInput = {
 };
 export type AgentDefinition = {
   id: string;
+  toolset?: "sdk";
   observe(raw: Readonly<Observation>): AgentView;
   buildContext(input: ContextInput): Promise<Message[]>;
 };

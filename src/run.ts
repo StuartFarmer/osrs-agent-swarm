@@ -20,7 +20,9 @@ import { merchant } from "../agents/merchant.ts";
 import { recordSession, verifyRecorder } from "./recording.ts";
 import type { RecordingResult } from "./recording.ts";
 import { gatherer } from "../agents/gatherer.ts";
-export const definitions = { merchant, gatherer };
+import { runebench } from "../agents/runebench.ts";
+import { connectCodeGame } from "./code-worker.ts";
+export const definitions = { merchant, gatherer, runebench };
 export type RunManifest = {
   runId: string;
   worldId: string;
@@ -281,12 +283,24 @@ export async function startRun(
     ]);
     const connected = await Promise.allSettled(
       accounts.map(async (account) => {
-        const game = await connectGame(
-          key(account.agentId),
-          account,
-          world,
-          experiment.limits.freshnessMs,
-        );
+        const scripted =
+          experiment.agents.find((a) => a.id === account.agentId)!
+            .definition === "runebench";
+        const game = scripted
+          ? await connectCodeGame(
+              key(account.agentId),
+              account,
+              world,
+              experiment.limits.freshnessMs,
+              prep,
+              root,
+            )
+          : await connectGame(
+              key(account.agentId),
+              account,
+              world,
+              experiment.limits.freshnessMs,
+            );
         games.set(account.agentId, game);
         await game.ready(prep);
         if (!manifest.startedAt) await game.prepare?.(prep);

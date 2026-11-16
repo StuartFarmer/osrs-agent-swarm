@@ -11,6 +11,7 @@ import type { AgentKey } from "./types.ts";
 import { project, historyFor, json } from "./agent-definition.ts";
 import type { AgentDefinition } from "./agent-definition.ts";
 import { actionIntent, pendingView, inspectAction } from "./action-history.ts";
+import { createCodeTools } from "./code-tools.ts";
 const obj = (fields: Record<string, TSchema>) =>
   Type.Object(fields, { additionalProperties: false });
 const int = (min = 0, max = 2147483647) =>
@@ -221,6 +222,13 @@ export function createTools(
       async (a) => historyFor(key, store, a.query, a.limit),
     ),
   ];
+  if (definition.toolset === "sdk")
+    return [
+      ...createCodeTools(key, game, store, trace),
+      ...read.filter(
+        (t) => t.name === "read_memory" || t.name === "update_memory",
+      ),
+    ];
   return [
     ...read,
     ...Object.entries(actions).map(([name, { fields, description }]) =>

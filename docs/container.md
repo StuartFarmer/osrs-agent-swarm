@@ -2,6 +2,8 @@
 
 The container runs the game server, SDK gateway, Pi agent harness, ten rendered Chromium clients, and FFmpeg recorder. You view and interact with those clients through your own browser. No host Node, Bun, Chromium, or FFmpeg installation is required.
 
+The paid preset now uses the [RuneBench SDK baseline](runebench-baseline.md), with one Bun code executor per character and searchable local SDK/wiki references. If you already ran the tableau preset, follow that guide's separate-run procedure; its saved run cannot be resumed with the new definitions.
+
 ## Start the 30-minute test
 
 In Docker Desktop, open **Settings → Resources / VM resources → Advanced** and allocate **at least 32 GiB of memory to the Docker VM**; 40 GiB leaves headroom if the Mac has enough physical RAM. Apply the change and let Docker restart before launching the swarm. Compose allows up to 32 GiB total container memory and 16 GiB of shared memory for Chromium. Shared memory counts toward the total; these are usage limits, not preallocated memory. CPU use is uncapped within the CPUs assigned to Docker Desktop. A Compose limit cannot enlarge the VM's allocation. See [Docker Desktop resource settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced).

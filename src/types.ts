@@ -35,7 +35,7 @@ export type Limits = {
 };
 export type AgentEntry = {
   id: string;
-  definition: "merchant" | "gatherer";
+  definition: "merchant" | "gatherer" | "runebench";
   profilePath: string;
   instructionsPath: string;
 };

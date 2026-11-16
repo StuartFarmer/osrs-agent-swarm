@@ -128,6 +128,12 @@ export type GameClient = {
   observe(): Observation;
   ready(signal: AbortSignal): Promise<void>;
   prepare?(signal: AbortSignal): Promise<void>;
+  executeCode?(
+    code: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+    world: "brief" | "none",
+  ): Promise<unknown>;
   execute(action: GameAction, signal: AbortSignal): Promise<ActionOutcome>;
   close(): Promise<void>;
 };
@@ -293,8 +299,6 @@ export function createGame(
       observedAt: receivedAt,
     };
     issued.set(seq, stamp);
-    for (const [n, v] of issued)
-      if (Date.now() - v.observedAt > freshnessMs) issued.delete(n);
     if (raw.bank.isOpen)
       knownBank = {
         observedAt: receivedAt,
@@ -329,8 +333,7 @@ export function createGame(
           if (
             !original ||
             action.stamp.sessionEpoch !== epoch ||
-            original.observedAt !== action.stamp.observedAt ||
-            Date.now() - original.observedAt > freshnessMs
+            original.observedAt !== action.stamp.observedAt
           )
             throw new Error("stale action reference");
           const o = observe();
@@ -387,6 +390,7 @@ export async function connectGame(
   account: { username: string; password: string },
   world: { gatewayUrl: string },
   freshnessMs = 3000,
+  scripts = false,
 ): Promise<GameClient> {
   localUrl(world.gatewayUrl, ["ws:"]);
   const sdkPath = new URL("./sdk.ts", import.meta.url).href;
@@ -427,6 +431,31 @@ export async function connectGame(
   );
   game.prepare = (signal) =>
     prepareCharacter(game, bot, executionContext, signal);
+  if (scripts) {
+    const { executeCode } = await import(
+      new URL("../vendor/rs-sdk/mcp/execute-code.ts", import.meta.url).href
+    );
+    const connection = {
+      sdk,
+      bot,
+      username: account.username,
+      connected: true,
+      lastShownMessageTick: -1,
+    };
+    const manager = { get: () => connection, connect: async () => connection };
+    game.executeCode = async (code, timeoutMs, signal, world) => {
+      const result = await executeCode(
+        manager,
+        account.username,
+        code,
+        timeoutMs,
+        signal,
+        undefined,
+        { world },
+      );
+      return result.structuredContent;
+    };
+  }
   return game;
 }
 

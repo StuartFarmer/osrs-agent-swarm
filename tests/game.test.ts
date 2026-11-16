@@ -55,6 +55,10 @@ function fixture() {
       at = Date.now() - 4000;
       seq++;
     },
+    refresh: () => {
+      at = Date.now();
+      seq++;
+    },
     setDispatch: (d: () => Promise<any>) => (dispatch = d),
   };
 }
@@ -87,6 +91,20 @@ test("slot reuse, stale observations and foreign sessions refuse effects", async
     ).status,
     "failed",
   );
+});
+test("LLM latency does not expire an action when current state still validates it", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  const stamp = f.stamp();
+  t.mock.timers.tick(10000);
+  // A fresh state arrived while the model was deciding.
+  f.refresh();
+  const outcome = await f.game.execute(
+    { kind: "say", stamp, text: "hello" },
+    signal,
+  );
+  assert.equal(outcome.status, "dispatched");
+  assert.equal(f.sent(), 1);
 });
 test("trade validates partner, screen and exact offers before each acceptance", async () => {
   for (const screen of ["offer", "confirm"] as const) {

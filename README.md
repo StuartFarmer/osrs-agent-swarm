@@ -18,3 +18,5 @@ The target environment is Node 24, Bun >=1.3.14, Pi 0.84.2, and the pinned upstr
 The provider adapter supports OpenAI-compatible Chat Completions and explicit OpenRouter routing with price ceilings and disabled reasoning. Other APIs need an explicit adapter. Python transport, headless clients, replay, dashboards, and evolution are later milestones.
 
 With Docker Desktop running and `OPENROUTER_API_KEY` exported, run `docker compose up --build -d swarm`. Watch the agents at [localhost:6080](http://localhost:6080/vnc.html?autoconnect=true&resize=scale). The container runs the game, agent harness, Chromium clients, and FFmpeg recorder; videos and traces appear in `runs/`. See the [container guide](docs/container.md) for restart behavior and validation limits. Collect names with the Python script if needed; collection is independent of the swarm.
+
+The paid preset now uses the [RuneBench SDK baseline](docs/runebench-baseline.md): TypeScript execution and searchable upstream wiki/docs, private notes, and no automatic full-world tableau. Existing tableau runs need the guide's separate-run procedure before restarting with the changed configuration.

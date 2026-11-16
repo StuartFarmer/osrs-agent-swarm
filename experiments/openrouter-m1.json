@@ -39,61 +39,61 @@
   "agents": [
     {
       "id": "agent1",
-      "definition": "merchant",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent1.json",
       "instructionsPath": "agents/profiles/agent1.md"
     },
     {
       "id": "agent2",
-      "definition": "gatherer",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent2.json",
       "instructionsPath": "agents/profiles/agent2.md"
     },
     {
       "id": "agent3",
-      "definition": "merchant",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent3.json",
       "instructionsPath": "agents/profiles/agent3.md"
     },
     {
       "id": "agent4",
-      "definition": "gatherer",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent4.json",
       "instructionsPath": "agents/profiles/agent4.md"
     },
     {
       "id": "agent5",
-      "definition": "merchant",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent5.json",
       "instructionsPath": "agents/profiles/agent5.md"
     },
     {
       "id": "agent6",
-      "definition": "gatherer",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent6.json",
       "instructionsPath": "agents/profiles/agent6.md"
     },
     {
       "id": "agent7",
-      "definition": "merchant",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent7.json",
       "instructionsPath": "agents/profiles/agent7.md"
     },
     {
       "id": "agent8",
-      "definition": "gatherer",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent8.json",
       "instructionsPath": "agents/profiles/agent8.md"
     },
     {
       "id": "agent9",
-      "definition": "merchant",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent9.json",
       "instructionsPath": "agents/profiles/agent9.md"
     },
     {
       "id": "agent10",
-      "definition": "gatherer",
+      "definition": "runebench",
       "profilePath": "agents/profiles/agent10.json",
       "instructionsPath": "agents/profiles/agent10.md"
     }

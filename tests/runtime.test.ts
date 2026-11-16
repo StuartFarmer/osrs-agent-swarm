@@ -15,6 +15,7 @@ import { Trace } from "../src/trace.ts";
 import { Gate } from "../src/inference.ts";
 import { runTask } from "../src/runtime.ts";
 import { gatherer } from "../agents/gatherer.ts";
+import { runebench } from "../agents/runebench.ts";
 import { createGame } from "../src/game.ts";
 import { loadExperiment } from "../src/config.ts";
 import { setTimeout as delay } from "node:timers/promises";
@@ -164,6 +165,72 @@ test("real Pi follow-up sees changed memory and one fresh tableau; saved Context
     sent,
   );
 });
+
+test("Pi SDK baseline executes snippets and keeps large observations out of repeated model context", async (t) => {
+  const deps = await setup(t);
+  deps.raw.nearbyLocs = Array.from({ length: 500 }, (_, id) => ({
+    id,
+    name: "RAW_OBJECT_SENTINEL",
+    x: id,
+    z: id,
+  }));
+  const scripts: string[] = [];
+  deps.game.executeCode = async (code) => {
+    scripts.push(code);
+    return { ok: true, result: "x".repeat(15000), world: null };
+  };
+  let requests = 0;
+  const sent: Context[] = [];
+  const result = await runTask(
+    {
+      ...deps,
+      definition: runebench,
+      limits: { ...deps.limits, contextBytes: 20000 },
+      provider: {
+        model,
+        upperUsd: 0,
+        capUsd: 0,
+        stream: (_model: any, context: Context) => {
+          sent.push(structuredClone(context));
+          if (++requests <= 4)
+            return response(
+              [
+                {
+                  type: "toolCall",
+                  id: `code${requests}`,
+                  name: "execute_code",
+                  arguments: { code: "return sdk.getInventory();" },
+                },
+              ],
+              "toolUse",
+            );
+          return response([{ type: "text", text: "Done" }]);
+        },
+      },
+    },
+    new AbortController().signal,
+  );
+  assert.equal(result.status, "completed", result.reason);
+  assert.equal(scripts.length, 4);
+  for (const context of sent) {
+    assert.ok(Buffer.byteLength(JSON.stringify(context)) <= 20000);
+    assert.doesNotMatch(
+      JSON.stringify(context),
+      /RAW_OBJECT_SENTINEL|live-state/,
+    );
+    assert.deepEqual(context.tools!.map((t) => t.name).sort(), [
+      "execute_code",
+      "read_memory",
+      "read_reference",
+      "search_reference",
+      "update_memory",
+    ]);
+  }
+  assert.equal(
+    deps.store.events(key).filter((e) => e.type === "script_result").length,
+    4,
+  );
+});
 test("state is collected after queue admission", async (t) => {
   const deps = await setup(t);
   const gate = new Gate(1, deps.store),
@@ -191,6 +258,32 @@ test("state is collected after queue admission", async (t) => {
   lease.finish(0);
   await task;
   assert.ok(content.includes("9876"));
+});
+
+test("SDK worker loss prevents new provider calls", async (t) => {
+  const deps = await setup(t);
+  deps.game.observe = () => {
+    throw new Error("No state: SDK worker exited");
+  };
+  let calls = 0;
+  const result = await runTask(
+    {
+      ...deps,
+      definition: runebench,
+      provider: {
+        model,
+        upperUsd: 0,
+        capUsd: 0,
+        stream: () => {
+          calls++;
+          return response([]);
+        },
+      },
+    },
+    new AbortController().signal,
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(calls, 0);
 });
 test("request and tool bounds terminate without retrying provider calls", async (t) => {
   const deps = await setup(t);

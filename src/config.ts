@@ -181,7 +181,7 @@ export async function loadExperiment(
     identifier(a.id);
     if (ids.has(a.id)) throw new Error("duplicate agent id");
     ids.add(a.id);
-    if (!["merchant", "gatherer"].includes(a.definition as string))
+    if (!["merchant", "gatherer", "runebench"].includes(a.definition as string))
       throw new Error("unknown agent definition");
     await containedFile(root, a.profilePath);
     await containedFile(root, a.instructionsPath);

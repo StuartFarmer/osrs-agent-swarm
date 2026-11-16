@@ -19,6 +19,7 @@ import type { AgentDefinition } from "./agent-definition.ts";
 import { createTools } from "./tools.ts";
 import { pendingView, inspectAction } from "./action-history.ts";
 import { usageCost } from "./inference.ts";
+import { fitConversation } from "../agents/runebench.ts";
 import type { Gate, Provider, Lease } from "./inference.ts";
 export type TaskResult = {
   taskId: string;
@@ -153,7 +154,10 @@ export async function runTask(
         );
         signal.throwIfAborted();
         const observation = d.game.observe();
-        if (observation.ageMs > d.limits.freshnessMs)
+        if (
+          d.definition.toolset !== "sdk" &&
+          observation.ageMs > d.limits.freshnessMs
+        )
           throw new Error("stale observation");
         const input = contextInput(
           d.definition,
@@ -189,6 +193,8 @@ export async function runTask(
             })),
           }),
         );
+        if (d.definition.toolset === "sdk")
+          fitConversation(context, d.limits.contextBytes);
         if (Buffer.byteLength(JSON.stringify(context)) > d.limits.contextBytes)
           throw new Error("context byte limit");
         const options: SimpleStreamOptions = {
@@ -218,7 +224,10 @@ export async function runTask(
         );
         await d.trace.flush(d.key);
         signal.throwIfAborted();
-        if (Date.now() - observation.stamp.observedAt > d.limits.freshnessMs)
+        if (
+          d.definition.toolset !== "sdk" &&
+          Date.now() - observation.stamp.observedAt > d.limits.freshnessMs
+        )
           throw new Error("observation aged during context construction");
         requests++;
         dispatched = true;
