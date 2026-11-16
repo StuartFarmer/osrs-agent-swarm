@@ -34,7 +34,7 @@ export type RawState = {
   [key:string]:unknown;
 };
 export type Observation = {stamp:Stamp;ageMs:number;clientTick:number;raw:RawState;knownBank:{observedAt:number;items:Item[]}|null};
-export type GameClient = {observe():Observation;ready(signal:AbortSignal):Promise<void>;execute(action:GameAction,signal:AbortSignal):Promise<ActionOutcome>;close():Promise<void>};
+export type GameClient = {observe():Observation;ready(signal:AbortSignal):Promise<void>;prepare?(signal:AbortSignal):Promise<void>;execute(action:GameAction,signal:AbortSignal):Promise<ActionOutcome>;close():Promise<void>};
 export type Transport = {
   snapshot():{raw:RawState|null;receivedAt:number;seq:number};
   dispatch(action:GameAction,state:RawState,signal:AbortSignal):Promise<{success:boolean;phase?:string;reason?:string}>;
@@ -128,7 +128,7 @@ export async function connectGame(key:AgentKey,account:{username:string;password
     connectionMode:'control',autoLaunchBrowser:false,autoReconnect:false,readyTimeout:0,showChat:true,actionTimeout:30000});
   const bot=new BotActions(sdk);let seq=0;sdk.onStateUpdate(()=>seq++);
   try {await sdk.connect()}catch(e){await sdk.disconnect();throw e}
-  return createGame({
+  const game=createGame({
     snapshot:()=>({raw:sdk.getState(),receivedAt:sdk.getStateReceivedAt()??0,seq}),
     close:()=>sdk.disconnect(),
     dispatch:(a,s,signal)=>executionContext.run({signal},async()=>{
@@ -172,5 +172,10 @@ export async function connectGame(key:AgentKey,account:{username:string;password
       }
     }),
   });
+  game.prepare=async signal=>{
+    const result=await executionContext.run({signal},()=>bot.skipTutorial({randomizeAppearance:false}));
+    if(!result.success)throw new Error('tutorial preparation failed');
+  };
+  return game;
 }
 
