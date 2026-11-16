@@ -71,7 +71,7 @@ test("browser readiness times out clearly when no endpoint appears", async (t) =
   );
 });
 
-test("generated account passwords fit the game protocol and persist across restart", async (t) => {
+test("local bot accounts share the admin password and preserve saved credentials", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "swarm-accounts-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const world = { dir } as any;
@@ -79,10 +79,20 @@ test("generated account passwords fit the game protocol and persist across resta
   const namePool = join(dir, "missing.sqlite");
   const accounts = await accountsFor(world, entries, namePool);
   assert.ok(
-    accounts.every((a) => /^[a-f0-9]{20}$/.test(a.password)),
-    "game passwords must be at most 20 characters",
+    accounts.every((a) => a.password === "admin"),
+    "all newly created local bots use the shared password",
   );
   assert.deepEqual(await accountsFor(world, entries, namePool), accounts);
+  const existing = accounts.map((a) => ({
+    ...a,
+    password: "previous-password",
+  }));
+  await writeFile(join(dir, "accounts.json"), JSON.stringify(existing));
+  assert.deepEqual(
+    await accountsFor(world, entries, namePool),
+    existing,
+    "changing saved passwords without updating the login database would break authentication",
+  );
   const legacy = accounts.map((a) => ({ ...a, password: "x".repeat(32) }));
   await writeFile(join(dir, "accounts.json"), JSON.stringify(legacy));
   await assert.rejects(accountsFor(world, entries, namePool), /password.*20/);

@@ -48,7 +48,7 @@ rtk npm run swarm -- world start m1
 rtk npm run swarm -- clients start --experiment experiments/openrouter-m1.json
 ```
 
-The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 43501; run one world at a time. Each world has its own accounts, saves, logs, and browser profile under .local/worlds. The launcher sets `WEBSITE_REGISTRATION=false` so the local login server creates new accounts on first authenticated connection. Generated passwords are 20 characters, matching the game client limit. Existing tabs reload if their stored credentials change. Browser connections are separate from SDK controllers. Focusing/capturing a tab does not log in a second client or steal control.
+The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 43501; run one world at a time. Each world has its own accounts, saves, logs, and browser profile under .local/worlds. The launcher sets `WEBSITE_REGISTRATION=false` so the local login server creates new accounts on first authenticated connection. New bot accounts share the password `admin`, which satisfies the local client's 1–20 character limit. Saved rosters retain their credentials; changing an existing account requires updating both `accounts.json` and its login database hash. Existing tabs reload if their stored credentials change. Browser connections are separate from SDK controllers. Focusing/capturing a tab does not log in a second client or steal control.
 
 ## Collect agent names
 
@@ -103,6 +103,21 @@ The model's [reasoning control](https://openrouter.ai/docs/guides/best-practices
 For another endpoint, copy `experiments/m1.json` to an ignored local experiment, retain paths relative to the project root, and set an explicit model object with `provider`, `modelId`, `baseUrl`, `apiKeyEnv`, `contextWindow`, `costLimitUsd`, `zeroCost`, and per-million-token `rates` (`input`, `output`, `cacheRead`, `cacheWrite`). `provider` supports `openrouter` or `openai-compatible`. All-zero paid tariffs are rejected; a genuinely unmetered endpoint needs `zeroCost: true` and zero rates.
 
 ## Operate a run
+
+For the first 30-minute recorded experiment after the social smoke, close the smoke world's dedicated Chrome window, then run the following from the `typescript-poc` checkout in zsh. `world create m1` is a one-time step; if that world already exists, keep it and skip creation.
+
+```sh
+nvm use 24
+npm run swarm -- world stop m1smoke
+npm run swarm -- world create m1
+npm run swarm -- world start m1
+npm run swarm -- clients start --experiment experiments/openrouter-m1.json
+read -rs 'OPENROUTER_API_KEY?OpenRouter API key: '
+export OPENROUTER_API_KEY
+npm run swarm -- run --experiment experiments/openrouter-m1.json --record
+```
+
+The hidden prompt keeps the key out of shell history; skip it if your environment already supplies the key. The experiment uses ten accounts, a 1,800-second duration after preparation, four concurrent model calls, and a $5 ledger cap. New accounts draw from the collected name pool and share the password `admin`. Look for `[run] RUN_ID` in the terminal; recordings and traces are saved under that run directory.
 
 ```sh
 rtk npm run swarm -- run --experiment experiments/openrouter-m1.json

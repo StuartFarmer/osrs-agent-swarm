@@ -89,7 +89,7 @@ export async function accountsFor(
     );
   const accounts = identities.map((identity) => ({
     ...identity,
-    password: randomBytes(10).toString("hex"),
+    password: "admin",
   }));
   await writeFile(path, JSON.stringify(accounts, null, 2), {
     flag: "wx",
