@@ -2,6 +2,8 @@
 
 The goal is ten visible agents with independently programmable observations, memory, and context construction. The operator's three-character social smoke passed; the paid ten-agent milestone run is still pending. Do not treat the acceptance checker or skipped live tests as proof of a functioning swarm.
 
+For the containerized swarm, use the **[Docker run guide](container.md)**. The native installation commands below remain available for development. Docker includes the server, clients, harness, recorder, and a desktop you can view in your browser.
+
 ## Install and verify
 
 Use Node 24, Bun >=1.3.14, and Python 3.10+. Recording and its media tests also require FFmpeg (with libx264 and drawtext) and ffprobe on PATH; on macOS install these with `brew install ffmpeg`. From this checkout:
@@ -13,7 +15,7 @@ rtk proxy sh -c 'cd vendor/rs-sdk && bun install --frozen-lockfile'
 rtk npm run check
 ```
 
-The operator-generated package lock is present but remains untracked pending review. The submodule revision is 3aa493c3d26680df5bae2b475cc1805e3db05ae3. The compatibility test requires Node 24 and imports the actual SDK and Pi. Live runs reject the wrong Node/Pi versions.
+The reviewed package lock is checked in and used by the container's `npm ci`. The submodule revision is 3aa493c3d26680df5bae2b475cc1805e3db05ae3. The compatibility test requires Node 24 and imports the actual SDK and Pi. Live runs reject the wrong Node/Pi versions.
 
 Puppeteer downloads a browser during installation. To use an existing Chromium instead, install with PUPPETEER_SKIP_DOWNLOAD=true and set CHROMIUM_PATH to its executable when starting clients. On this machine that executable is /Applications/Chromium.app/Contents/MacOS/Chromium.
 
@@ -54,32 +56,7 @@ The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 435
 
 ## Collect agent names
 
-With Docker Desktop running, start the containerized collector from this checkout. Python and the collector's tests are included in the image; no host Python installation is needed:
-
-```sh
-docker compose up --build -d hiscores
-docker compose logs -f hiscores
-```
-
-The service bind-mounts `.local/hiscores` at `/data`, so the database and checkpoints remain on your machine after the container is stopped, removed, or rebuilt. This is the same pool the local swarm reads. The build context contains only the scraper and its tests; game files, credentials, and collected data are not sent to the image build.
-
-Inspect progress, stop, and resume:
-
-```sh
-docker compose run --rm --no-deps hiscores --status
-docker compose stop hiscores
-docker compose up -d hiscores
-```
-
-Stopping sends SIGINT so the collector can close SQLite cleanly. Ctrl-C while following logs only stops the log viewer; use `docker compose stop hiscores` to stop collection. The container exits on completion or an HTTP/parser error and does not automatically retry a blocked website. Check `docker compose logs hiscores` before restarting after an error. For a bounded foreground test instead of the background service:
-
-```sh
-docker compose run --build --rm hiscores --max-pages 10
-```
-
-Run only one collecting container against this database at a time; a concurrent `--status` is fine. The image runs the parser/checkpoint tests during build. Container build and execution could not be verified in the coding sandbox because access to the local Docker daemon is denied.
-
-You can also run the standard-library Python collector directly. With no page limit either method traverses the discoverable skill and activity categories in the main Old School hiscores instance, following pagination to the end of each category:
+Run the standard-library Python collector directly if more names are needed. The existing pool contains 3,998 unique names collected by the operator; it is already sufficient for the first ten agents. With no page limit the script traverses the discoverable skill and activity categories in the main Old School hiscores instance, following pagination to the end of each category:
 
 ```sh
 python3 scripts/collect_hiscore_names.py
@@ -90,7 +67,7 @@ Each page commits deduplicated, game-normalized names and a checkpoint to `.loca
 
 Collect names **before** `clients start` for a new world. New rosters automatically use a populated default pool, reserving names uniquely across worlds. Set `SWARM_NAMES_DB=/absolute/path/names.sqlite` to require a particular pool. Existing `accounts.json` files retain their identities; do not delete them to rename characters. The smoke world's accounts therefore remain unchanged. If the default pool is absent or empty, startup logs that it is using synthetic names; an explicitly configured missing or empty pool fails instead.
 
-This collects public display names, not login identities. Separate seasonal/ironman hiscores instances are outside the requested main leaderboard. Rankings can change during a long crawl, so the result is a deduplicated collection over time, not a simultaneous snapshot or a list of every OSRS account. The parser has fixture coverage, but a live request from this environment failed DNS resolution; no real names have been collected yet. If live markup differs, the collector stops rather than silently claiming completion.
+This collects public display names, not login identities. Separate seasonal/ironman hiscores instances are outside the requested main leaderboard. Rankings can change during a long crawl, so the result is a deduplicated collection over time, not a simultaneous snapshot or a list of every OSRS account. The operator stopped after 217 pages across 114 discovered categories and accepted that pool; a complete crawl is unnecessary for this test. If live markup differs, the collector stops rather than silently claiming completion.
 
 ## Configure inference
 

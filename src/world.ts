@@ -337,7 +337,9 @@ export async function worldReady(
 export async function startWorld(
   id: string,
   root = process.cwd(),
+  signal?: AbortSignal,
 ): Promise<WorldHandle> {
+  signal?.throwIfAborted();
   const w = await readWorld(id, root),
     file = join(w.dir, "processes.json");
   if (existsSync(file)) {
@@ -371,12 +373,13 @@ export async function startWorld(
     }
     const deadline = Date.now() + 300000;
     while (Date.now() < deadline) {
+      signal?.throwIfAborted();
       if (!(await Promise.all(processes.map(ownsProcess))).every(Boolean))
         throw new Error("world process exited; inspect local logs");
       try {
         if (await worldReady(w)) return w;
       } catch {}
-      await delay(500);
+      await delay(500, undefined, { signal });
     }
     throw new Error("world preparation timeout");
   } catch (e) {

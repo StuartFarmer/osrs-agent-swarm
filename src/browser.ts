@@ -257,13 +257,7 @@ export async function startBrowser(
         process.env.CHROMIUM_PATH || puppeteer.executablePath();
       owned = await spawnOwned(
         executable,
-        [
-          "--user-data-dir=" + sessionProfile,
-          "--remote-debugging-port=0",
-          "--remote-debugging-address=127.0.0.1",
-          "--no-first-run",
-          "about:blank",
-        ],
+        browserArguments(sessionProfile),
         world.dir,
         join(world.dir, "browser.log"),
       );
@@ -299,4 +293,25 @@ export async function startBrowser(
     }
     throw e;
   }
+}
+export function browserArguments(
+  profile: string,
+  container = process.env.SWARM_CONTAINER === "1",
+): string[] {
+  return [
+    "--user-data-dir=" + profile,
+    "--remote-debugging-port=0",
+    "--remote-debugging-address=127.0.0.1",
+    "--no-first-run",
+    ...(container
+      ? [
+          "--no-sandbox",
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-backgrounding-occluded-windows",
+          "--window-size=1280,900",
+        ]
+      : []),
+    "about:blank",
+  ];
 }

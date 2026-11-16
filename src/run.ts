@@ -180,6 +180,7 @@ export async function startRun(
     signal?: AbortSignal;
     root?: string;
     record?: boolean;
+    onRunCreated?: (runId: string) => Promise<void>;
   } = {},
 ): Promise<RunReport> {
   if (!experiment.model)
@@ -236,6 +237,7 @@ export async function startRun(
         mode: "live",
       };
       await writeJson(join(dir, "manifest.json"), manifest);
+      await options.onRunCreated?.(runId);
     }
     console.error(`[run] ${runId}`);
     if (options.record)

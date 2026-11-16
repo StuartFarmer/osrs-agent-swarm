@@ -9,5 +9,10 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "agents/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "agents/**/*.ts",
+    "tests/**/*.ts",
+    "docker/**/*.ts"
+  ]
 }

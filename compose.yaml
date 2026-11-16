@@ -1,10 +1,18 @@
 services:
-  hiscores:
-    build:
-      context: ./scripts
-      dockerfile: Dockerfile.hiscores
+  swarm:
+    build: .
     init: true
+    shm_size: 2gb
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    ports:
+      - "127.0.0.1:6080:6080"
     volumes:
-      - ./.local/hiscores:/data
-    stop_signal: SIGINT
-    stop_grace_period: 40s
+      - swarm-state:/app/.local
+      - ./.local/hiscores:/app/.local/hiscores
+      - ./runs:/app/runs
+      - ./agents:/app/agents:ro
+      - ./experiments:/app/experiments:ro
+    stop_grace_period: 240s
+volumes:
+  swarm-state:

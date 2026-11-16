@@ -6,7 +6,9 @@ Implemented: strict ten-agent experiment configuration; private revisioned SQLit
 
 Current checks (after review fixes):
 
-- Target Node 24.22.3 suite through tsx: 65 passing, 1 skipped, 0 failed.
+- Target Node 24.22.3 suite through tsx: 69 passing, 1 skipped, 0 failed.
+- Swarm container configuration passes Compose validation and entrypoint shell syntax checks. Tests cover atomic world seeding, preservation/refusal of existing state, durable run selection, container-only Chrome flags, and cancelled startup. Docker packages the game, gateway, harness, rendered desktop, and recorder; image build and live Linux/browser execution remain unverified because the sandbox cannot access the Docker daemon.
+- The existing npm lock was reviewed against `package.json` (matching versions, public npm registry resolutions) and is now tracked for the image's `npm ci`. The image build runs the offline checks after preparing its world template.
 - Reproduced an interrupted `m1` setup: cached config packing skipped constants and parameter initialization, then model-flag rebuilding failed on `damagetype,^crush_style`. A guarded patch now initializes that context before either cached return. The actual engine build, cached rebuild with NPC parameter parsing, web client build, and migration check passed. Effective settings were verified and `m1`'s manifest was completed without replacing its directory. Regression tests cover the pinned patch and incomplete-world diagnostics. Server startup remains a terminal-side check.
 - Python collector suite: 4 passing. Covers category/pagination discovery, normalization, checkpoint resume, deduplication, malformed/blocked pages, valid names containing “Captcha,” and repeated-page detection.
 - Short recordings encoded with real FFmpeg and inspected with ffprobe: playable H.264 MP4s, expected dimensions, agent rotation, wall-clock/video timing alignment, and playable output after interruption. Browser canvas extraction is tested with a DOM fixture; no live Chrome recording has been verified.
@@ -31,14 +33,14 @@ The operator's `.local/worlds/m1smoke/social-smoke.json`, timestamped 2026-11-16
 
 Environment blockers:
 
-- The first live hiscores request failed DNS resolution. The default SQLite checkpoint exists but contains **zero collected names**. The parser has fixture coverage; actual live markup and complete category coverage remain unverified. Unexpected markup stops collection instead of claiming completion.
+- Requests from the coding sandbox failed DNS resolution, but the operator subsequently collected **3,998 names across 217 pages and 114 discovered categories**. The operator accepted this pool and stopped the crawl; exhaustive collection is not required for the first experiment.
 - Operator installation populated the dependencies and pinned submodule. A fresh world recreation from the coding sandbox still fails on Bun install temp-directory permissions; preserved incomplete setups have no completed world manifest.
 - Local listening sockets are denied, preventing a local engine and browser smoke test.
 - OpenRouter, DeepSeek Flash, and the $5 maximum are configured in experiments/openrouter-m1.json. OPENROUTER_API_KEY is absent. No inference spending has occurred.
 
 Remaining work before acceptance:
 
-1. Review/check in the operator-generated package-lock.json and run the socket ownership test outside the sandbox.
+1. Build and start the swarm image outside the sandbox; verify the browser desktop, recording, and graceful container stop. Run the socket ownership test there.
 2. Validate fresh automatic character preparation and randomized appearances; collect a seed name pool and check live pagination. The complete crawl is separately resumable.
 3. Calibrate an ordinary gathering/banking/shop route; social smoke has passed.
 4. Run ten rendered agents for 30 minutes with recording and explicit inference configuration, and perform the operator interventions.
