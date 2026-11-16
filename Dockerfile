@@ -21,6 +21,8 @@ RUN git init vendor/rs-sdk \
     && git -C vendor/rs-sdk remote add origin https://github.com/MaxBittker/rs-sdk.git \
     && git -C vendor/rs-sdk fetch --depth 1 origin 3aa493c3d26680df5bae2b475cc1805e3db05ae3 \
     && git -C vendor/rs-sdk checkout --detach FETCH_HEAD
+# The harness imports this checkout's SDK, separately from the prepared game copy.
+RUN bun install --cwd vendor/rs-sdk --frozen-lockfile
 COPY . .
 RUN node --import tsx docker/build-world.ts \
     && npm run check \
