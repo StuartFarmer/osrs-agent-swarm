@@ -6,7 +6,8 @@ Implemented: strict ten-agent experiment configuration; private revisioned SQLit
 
 Current checks (after review fixes):
 
-- Target Node 24.22.3 suite through tsx: 63 passing, 1 skipped, 0 failed.
+- Target Node 24.22.3 suite through tsx: 65 passing, 1 skipped, 0 failed.
+- Reproduced an interrupted `m1` setup: cached config packing skipped constants and parameter initialization, then model-flag rebuilding failed on `damagetype,^crush_style`. A guarded patch now initializes that context before either cached return. The actual engine build, cached rebuild with NPC parameter parsing, web client build, and migration check passed. Effective settings were verified and `m1`'s manifest was completed without replacing its directory. Regression tests cover the pinned patch and incomplete-world diagnostics. Server startup remains a terminal-side check.
 - Python collector suite: 4 passing. Covers category/pagination discovery, normalization, checkpoint resume, deduplication, malformed/blocked pages, valid names containing “Captcha,” and repeated-page detection.
 - Short recordings encoded with real FFmpeg and inspected with ffprobe: playable H.264 MP4s, expected dimensions, agent rotation, wall-clock/video timing alignment, and playable output after interruption. Browser canvas extraction is tested with a DOM fixture; no live Chrome recording has been verified.
 - SQLite tests verify unique naming across worlds, stable allocation on restart, exhaustion handling, and preservation of saved account credentials when the pool changes.

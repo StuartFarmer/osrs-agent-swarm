@@ -48,14 +48,21 @@ export const worldEnv = {
 export function worldPath(id: string, root = process.cwd()): string {
   return join(resolve(root), ".local", "worlds", identifier(id));
 }
+function incompleteWorld(dir: string): Error {
+  return new Error(
+    `World directory exists but preparation is incomplete (world.json missing). Check the original world create error; files are preserved at ${dir}.`,
+  );
+}
 export async function readWorld(
   id: string,
   root = process.cwd(),
 ): Promise<WorldHandle> {
-  const dir = worldPath(id, root),
-    w = JSON.parse(
-      await readFile(join(dir, "world.json"), "utf8"),
-    ) as WorldHandle;
+  const dir = worldPath(id, root);
+  if (existsSync(dir) && !existsSync(join(dir, "world.json")))
+    throw incompleteWorld(dir);
+  const w = JSON.parse(
+    await readFile(join(dir, "world.json"), "utf8"),
+  ) as WorldHandle;
   if (
     w.id !== id ||
     w.revision !== SDK_REVISION ||
@@ -81,6 +88,48 @@ export function patchLoopback(source: string, expected: number): string {
   if (source.split("'0.0.0.0'").length - 1 !== expected)
     throw new Error("upstream pin changed: loopback patch refused");
   return source.replaceAll("'0.0.0.0'", "'127.0.0.1'");
+}
+export function patchPackingContext(source: string): string {
+  const cachedReturn = `    if (!needsAnyConfigPackWork && !rebuildCategory && cache.has(0, 2)) {
+        return;
+    }
+
+`;
+  const before = `    if (!needsAnyConfigPackWork) {
+        cache.write(0, 2, fs.readFileSync('data/pack/client/config'));
+        return;
+    }
+
+`;
+  const after = `    if (!needsAnyConfigPackWork) {
+        // Model flag rebuilding also needs constants and parameter definitions.
+        const { default: ParamType } = await importCached('#/cache/config/ParamType.js');
+        ParamType.load('data/pack');
+        cache.write(0, 2, fs.readFileSync('data/pack/client/config'));
+        return;
+    }
+
+`;
+  const anchor =
+    "    // var domains are global, so we need to check for conflicts";
+  if (source.split(after).length === 2) return source.replace(cachedReturn, "");
+  if (
+    source.split(before).length !== 2 ||
+    source.split(cachedReturn).length !== 2 ||
+    source.split(anchor).length !== 2 ||
+    source.indexOf("CONSTANTS.set(name, value)") > source.indexOf(anchor)
+  )
+    throw new Error("upstream pin changed: packing context patch refused");
+  return source
+    .replace(cachedReturn, "")
+    .replace(before, "")
+    .replace(anchor, after + anchor);
+}
+async function installPackingContext(gameDir: string): Promise<void> {
+  const path = join(gameDir, "server/engine/tools/pack/config/PackShared.ts");
+  const before = await readFile(path, "utf8"),
+    after = patchPackingContext(before);
+  if (before !== after) await writeFile(path, after);
 }
 export function patchGatewayReadiness(source: string): string {
   const before = "status: 'running',\n                bots,";
@@ -116,10 +165,12 @@ export async function prepareWorld(
   root = process.cwd(),
 ): Promise<WorldHandle> {
   const dir = worldPath(id, root);
-  if (existsSync(dir))
+  if (existsSync(dir)) {
+    if (!existsSync(join(dir, "world.json"))) throw incompleteWorld(dir);
     throw new Error(
       "world already exists; saved state will not be overwritten",
     );
+  }
   const vendor = join(resolve(root), "vendor/rs-sdk");
   const pin = (await command("git", ["rev-parse", "HEAD"], vendor)).trim();
   if (pin !== SDK_REVISION)
@@ -155,6 +206,7 @@ export async function prepareWorld(
     await writeFile(path, source);
   }
   await installGatewayReadiness(gameDir);
+  await installPackingContext(gameDir);
   const configDir = join(gameDir, "server/engine/data/config");
   await mkdir(configDir, { recursive: true });
   await writeJson(join(configDir, "world.json"), {
@@ -296,6 +348,7 @@ export async function startWorld(
       );
   }
   await installGatewayReadiness(w.gameDir);
+  await installPackingContext(w.gameDir);
   await Promise.all(
     [8888, 8898, 7780, 43594, 43500, 45099, 43501].map(portFree),
   );
