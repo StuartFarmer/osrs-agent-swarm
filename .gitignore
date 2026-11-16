@@ -1,0 +1,8 @@
+/references/
+/.worktrees/
+/.superpowers/
+/node_modules/
+/.local/
+/runs/
+/.env*
+!/.env.example
