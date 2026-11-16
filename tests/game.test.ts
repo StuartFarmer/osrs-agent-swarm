@@ -142,7 +142,11 @@ test("dispatch failure and disconnect preserve uncertainty without retrying", as
   );
   assert.equal(r.status, "uncertain");
   assert.equal(f.sent(), 1);
-  f.setDispatch(async () => ({ success: false, reason: "cant_reach" }));
+  f.setDispatch(async () => ({
+    success: false,
+    reason: "cant_reach",
+    phase: "validation",
+  }));
   assert.equal(
     (
       await f.game.execute(

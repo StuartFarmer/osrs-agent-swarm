@@ -8,7 +8,9 @@ import {
   waitForReady,
   runDeadline,
   reloadProfile,
+  summarizeAgent,
 } from "../src/run.ts";
+import { Store } from "../src/store.ts";
 test("world ownership is exclusive and released after shutdown", async (t) => {
   let release: () => Promise<void>;
   try {
@@ -90,4 +92,29 @@ test("invalid profile edits preserve last valid version", async (t) => {
   const invalid = await reloadProfile(root, a, next.profile);
   assert.equal(invalid.profile.hash, next.profile.hash);
   assert.ok(invalid.error);
+});
+
+test("resumed report totals include tasks completed before the restart", () => {
+  const store = new Store(":memory:"),
+    key = { runId: "r", worldId: "w", agentId: "a" };
+  try {
+    store.append(key, {
+      type: "task_finished",
+      data: { status: "completed", requests: 2, tools: 3, reason: "" },
+    });
+    store.append(key, {
+      type: "task_finished",
+      data: { status: "failed", requests: 1, tools: 0, reason: "offline" },
+    });
+    assert.deepEqual(summarizeAgent(store, key), {
+      tasks: 2,
+      requests: 3,
+      tools: 3,
+      failures: 1,
+      reason: "offline",
+    });
+    assert.equal(summarizeAgent(store, { ...key, agentId: "b" }).tasks, 0);
+  } finally {
+    store.close();
+  }
 });

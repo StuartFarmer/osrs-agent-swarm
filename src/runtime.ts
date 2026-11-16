@@ -12,10 +12,12 @@ import type {
 import type { GameClient } from "./game.ts";
 import type { Store } from "./store.ts";
 import type { Trace } from "./trace.ts";
+import { redact } from "./trace.ts";
 import type { AgentKey, Profile, Limits } from "./types.ts";
 import { contextInput, json } from "./agent-definition.ts";
 import type { AgentDefinition } from "./agent-definition.ts";
 import { createTools } from "./tools.ts";
+import { pendingView, inspectAction } from "./action-history.ts";
 import { usageCost } from "./inference.ts";
 import type { Gate, Provider, Lease } from "./inference.ts";
 export type TaskResult = {
@@ -66,6 +68,27 @@ export function validateMessages(messages: Message[]): void {
     }
   }
   if (pending.size) throw new Error("incomplete tool exchange");
+}
+
+function contextUntilAborted(
+  work: Promise<Message[]>,
+  signal: AbortSignal,
+): Promise<Message[]> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) reject(signal.reason);
+    else signal.addEventListener("abort", abort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
 }
 export async function runTask(
   d: TaskDeps,
@@ -140,15 +163,20 @@ export async function runTask(
           d.profile,
           base.messages,
         );
-        input.view.derived.uncertainActions = json(
-          d.store
-            .pendingActions(d.key)
-            .map((x) => ({
-              actionId: x.actionId,
-              status: x.outcome?.status ?? "unknown",
-            })),
+        for (const action of pendingView(d.key, d.store, 0, 50).entries) {
+          inspectAction(
+            d.key,
+            action.actionId,
+            d.store,
+            d.definition,
+            observation,
+          );
+        }
+        input.view.derived.uncertainActions = json(pendingView(d.key, d.store));
+        const messages = await contextUntilAborted(
+          d.definition.buildContext(input),
+          signal,
         );
-        const messages = await d.definition.buildContext(input);
         validateMessages(messages);
         const context: Context = JSON.parse(
           JSON.stringify({
@@ -177,6 +205,7 @@ export async function runTask(
             timeoutMs: options.timeoutMs,
           },
           model: d.provider.model,
+          providerSettings: d.provider.requestSettings,
           taskId,
           requestId,
           observationStamp: observation.stamp,
@@ -243,7 +272,14 @@ export async function runTask(
     initialState: {
       model: d.provider.model,
       systemPrompt: rules,
-      tools: createTools(d.key, d.game, d.store, d.trace, d.definition),
+      tools: createTools(
+        d.key,
+        d.game,
+        d.store,
+        d.trace,
+        d.definition,
+        d.limits.memoryBytes,
+      ),
     },
     beforeToolCall: async () => {
       if (signal.aborted) return { block: true, reason: "task cancelled" };
@@ -300,6 +336,7 @@ export async function runTask(
     clearTimeout(timer);
     signal.removeEventListener("abort", abort);
   }
+  reason = String(redact(reason, d.trace.secrets));
   const result = { taskId, status, reason, requests, tools };
   event("task_finished", result);
   await d.trace.flush(d.key);

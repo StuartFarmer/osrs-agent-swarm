@@ -27,9 +27,7 @@ async function contained(root: string, path: string): Promise<string> {
     throw new Error("evidence escapes run");
   return p;
 }
-export async function checkAcceptance(
-  runDir: string,
-): Promise<{
+export async function checkAcceptance(runDir: string): Promise<{
   passed: boolean;
   checks: Record<string, boolean>;
   missing: string[];

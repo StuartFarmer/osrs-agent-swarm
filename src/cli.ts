@@ -7,6 +7,7 @@ import { prepareWorld, startWorld, stopWorld, readWorld } from "./world.ts";
 import { startBrowser, attachBrowser, accountsFor } from "./browser.ts";
 import { startRun, readManifest, runDirectory } from "./run.ts";
 import { Store } from "./store.ts";
+import { validateMemory } from "./store.ts";
 import { Trace } from "./trace.ts";
 import { checkAcceptance } from "./acceptance.ts";
 const help = `RuneScape swarm POC (run from the repository root)
@@ -96,7 +97,14 @@ async function main(): Promise<number> {
   }
   await access(join(dir, "state.sqlite"));
   const store = new Store(join(dir, "state.sqlite")),
-    trace = new Trace(dir, store, manifest.experiment.limits.artifactBytes);
+    trace = new Trace(
+      dir,
+      store,
+      manifest.experiment.limits.artifactBytes,
+      manifest.experiment.model
+        ? [process.env[manifest.experiment.model.apiKeyEnv] ?? ""]
+        : [],
+    );
   try {
     if (command === "status") {
       print({
@@ -142,6 +150,7 @@ async function main(): Promise<number> {
       )
         throw new Error("memory set requires --file and --expected-revision");
       const value = JSON.parse(await readFile(values.file, "utf8"));
+      validateMemory(value, manifest.experiment.limits.memoryBytes);
       const m = store.updateMemory(
         key,
         Number(values["expected-revision"]),

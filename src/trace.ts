@@ -62,6 +62,8 @@ export class Trace {
     this.secrets = secrets;
     mkdirSync(this.runDir, { recursive: true, mode: 0o700 });
     store.guard = (extra) => this.check(extra);
+    store.sanitizeEvent = (event) =>
+      redact(event, this.secrets) as typeof event;
   }
   check(extra = 0): void {
     if (
@@ -94,6 +96,9 @@ export class Trace {
     }
   }
   async flush(key: AgentKey): Promise<void> {
+    this.store.exclusive(() => this.flushLocked(key));
+  }
+  private flushLocked(key: AgentKey): void {
     const path = join(this.dir(key), "events.jsonl");
     let last = 0;
     if (existsSync(path)) {
@@ -132,6 +137,16 @@ export class Trace {
     extension: string,
     data: string | Buffer,
   ): Promise<string> {
+    return this.store.exclusive(() =>
+      this.artifactLocked(key, id, extension, data),
+    );
+  }
+  private artifactLocked(
+    key: AgentKey,
+    id: string,
+    extension: string,
+    data: string | Buffer,
+  ): string {
     identifier(id);
     const path = join(this.dir(key), id + extension);
     if (existsSync(path)) throw new Error("artifact already exists");

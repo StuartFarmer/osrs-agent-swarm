@@ -5,10 +5,12 @@ import type { TSchema } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { GameClient, GameAction } from "./game.ts";
 import type { Store } from "./store.ts";
+import { validateMemory } from "./store.ts";
 import type { Trace } from "./trace.ts";
 import type { AgentKey } from "./types.ts";
 import { project, historyFor, json } from "./agent-definition.ts";
 import type { AgentDefinition } from "./agent-definition.ts";
+import { actionIntent, pendingView, inspectAction } from "./action-history.ts";
 const obj = (fields: Record<string, TSchema>) =>
   Type.Object(fields, { additionalProperties: false });
 const int = (min = 0, max = 2147483647) =>
@@ -81,7 +83,8 @@ const actions: Record<
   },
   drop: {
     fields: { item, count: int(1) },
-    description: "Drop an exact item and count.",
+    description:
+      "Drop the entire selected slot. Count must equal that slot's observed count; partial stacks are refused.",
   },
   interact_npc: {
     fields: { target, option: int(1, 5) },
@@ -138,6 +141,7 @@ export function createTools(
   store: Store,
   trace: Trace,
   definition: AgentDefinition,
+  memoryBytes = 16384,
 ): AgentTool[] {
   function tool(
     name: string,
@@ -166,6 +170,28 @@ export function createTools(
   }
   const read = [
     tool(
+      "pending_actions",
+      "Page through unresolved actions; never blindly repeat them.",
+      obj({ offset: int(), limit: int(1, 50) }),
+      async (a) => pendingView(key, store, a.offset, a.limit),
+    ),
+    tool(
+      "inspect_action",
+      "Inspect a private action intent and check fresh state for its expected effect. Records completion only with observed evidence; does not replay it.",
+      obj({ actionId: text(64) }),
+      async (a) => {
+        const result = inspectAction(
+          key,
+          a.actionId,
+          store,
+          definition,
+          game.observe(),
+        );
+        await trace.flush(key);
+        return result;
+      },
+    ),
+    tool(
       "get_state",
       "Read fresh observations allowed by your observation policy.",
       obj({}),
@@ -182,6 +208,7 @@ export function createTools(
       "Replace your private memory at the expected revision.",
       obj({ expectedRevision: int(), value: memory }),
       async (a) => {
+        validateMemory(a.value, memoryBytes);
         const m = store.updateMemory(key, a.expectedRevision, a.value, "agent");
         await trace.flush(key);
         return m;
@@ -202,7 +229,7 @@ export function createTools(
         trace.check();
         const id = randomUUID(),
           action = { ...a, kind: name } as GameAction;
-        store.beginAction(key, id, json(action));
+        store.beginAction(key, id, actionIntent(action, game.observe()));
         await trace.flush(key);
         const outcome = await game.execute(action, signal);
         store.endAction(key, id, outcome);

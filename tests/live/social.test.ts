@@ -143,9 +143,9 @@ test(
       await act(0, {
         kind: "drop",
         item: { slot: item.slot, id: item.id },
-        count: 1,
+        count: item.count,
       });
-      await until(() => count(0, item.id) === initial - 1);
+      await until(() => count(0, item.id) === initial - item.count);
       await until(() => state(0).groundItems.some((x) => x.id === item.id));
       const ground = state(0).groundItems.find((x) => x.id === item.id)!;
       await act(0, {

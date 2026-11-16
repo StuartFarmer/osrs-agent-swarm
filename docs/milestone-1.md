@@ -37,43 +37,27 @@ Stop the smoke world and close its dedicated browser before starting another wor
 rtk npm run swarm -- world stop m1smoke
 rtk npm run swarm -- world create m1
 rtk npm run swarm -- world start m1
-rtk npm run swarm -- clients start --experiment experiments/m1.json
+rtk npm run swarm -- clients start --experiment experiments/openrouter-m1.json
 ```
 
 The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 43501; run one world at a time. Each world has its own accounts, saves, logs, and browser profile under .local/worlds. Browser connections are separate from SDK controllers. Focusing/capturing a tab does not log in a second client or steal control.
 
 ## Configure inference
 
-Copy experiments/m1.json to a local ignored experiment, keeping agent paths relative to the project root. Replace model:null with an explicit configuration:
+The selected preset is `experiments/openrouter-m1.json`: ten agents using OpenRouter, `deepseek/deepseek-v4.1-flash-1017`, and a **$5 maximum ledger budget** for the first test. Supply `OPENROUTER_API_KEY` in the process environment through your usual secret manager. It is currently absent; no paid request has been made. Never put the key in a checked-in file or agent context.
 
-```jsonc
-{
-  "provider": "openai-compatible",
-  "modelId": "YOUR_NON_REASONING_MODEL",
-  "baseUrl": "https://YOUR_ENDPOINT/v1",
-  "apiKeyEnv": "SWARM_MODEL_API_KEY",
-  "contextWindow": 32768,
-  "costLimitUsd": 5,
-  "zeroCost": false,
-  "rates": {
-    "input": 0,
-    "output": 0,
-    "cacheRead": 0,
-    "cacheWrite": 0,
-  },
-}
-```
+The model identifier was checked against [OpenRouter's model metadata](https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash-1017/endpoints). The preset requests disabled reasoning, price-sorted routing, no provider fallbacks, and support for all request parameters. It caps input at $0.05 and output at $0.50 per million tokens and per-request fees at zero, using [OpenRouter's routing controls](https://openrouter.ai/docs/guides/routing/provider-selection). These are conservative accounting tariffs and routing ceilings, not a promise of one provider's exact billing rate. If no endpoint qualifies, the request fails; the harness does not relax the ceilings automatically.
 
-Those context-window and budget values are illustrative. Replace them with your chosen limits and replace the zero tariffs with the provider's actual per-million-token rates. All-zero paid tariffs are rejected. For a truly unmetered endpoint, explicitly use zeroCost:true with zero rates. The key stays in the named environment variable, never in the experiment or agent context.
+The gate reserves a conservative maximum before dispatch, holds capacity through stream settlement, and keeps the reservation when usage is unknown. Failed pre-dispatch work is settled to zero. There are no automatic provider retries. Resume preserves spending and reservations. The harness's $5 enforcement depends on the endpoint honoring its token/price controls and reporting usage correctly; use an OpenRouter key with a $5 credit limit as the billing backstop.
 
-Only Chat Completions models whose max_tokens bounds billed output are supported initially. Models that generate separately billed/unbounded hidden reasoning require a different validated adapter. The ledger estimates spending from declared tariffs; set a provider-side billing cap as well if you require a hard billing limit.
+The model's [reasoning control](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens) is explicitly disabled in the serialized request. Only Chat Completions models with bounded billed output are supported. The current serializer test uses a fake HTTP response through the installed Pi implementation; actual endpoint behavior remains a live-test gate.
 
-The gate reserves a conservative maximum before dispatch, holds capacity through stream settlement, and keeps the reservation when usage is unknown. Failed pre-dispatch work is settled to zero. There are no automatic provider retries.
+For another endpoint, copy `experiments/m1.json` to an ignored local experiment, retain paths relative to the project root, and set an explicit model object with `provider`, `modelId`, `baseUrl`, `apiKeyEnv`, `contextWindow`, `costLimitUsd`, `zeroCost`, and per-million-token `rates` (`input`, `output`, `cacheRead`, `cacheWrite`). `provider` supports `openrouter` or `openai-compatible`. All-zero paid tariffs are rejected; a genuinely unmetered endpoint needs `zeroCost: true` and zero rates.
 
 ## Operate a run
 
 ```sh
-rtk npm run swarm -- run --experiment .local/m1.json
+rtk npm run swarm -- run --experiment experiments/openrouter-m1.json
 rtk npm run swarm -- status --run RUN_ID
 rtk npm run swarm -- memory get --run RUN_ID --agent agent1
 rtk npm run swarm -- memory set --run RUN_ID --agent agent1 --expected-revision 2 --file .local/memory.json
@@ -86,10 +70,10 @@ The run ID is the new directory under runs/. All characters must become ready an
 Ctrl-C drains the harness and disconnects SDK controllers. It leaves the world and rendered clients open. Resume using the same experiment:
 
 ```sh
-rtk npm run swarm -- run --experiment .local/m1.json --resume RUN_ID
+rtk npm run swarm -- run --experiment experiments/openrouter-m1.json --resume RUN_ID
 ```
 
-Resume retains the original deadline, memory, spending, and uncertain effects; downtime counts. It never reruns an unfinished action automatically. Module code edits require this harness restart. Only one harness may own a world's controllers. Ownership uses a loopback lock listener that the OS releases on process exit; a port conflict refuses the run.
+Resume retains the original deadline, memory, spending, and uncertain effects; downtime counts. It never reruns an unfinished action automatically. Report task totals include tasks completed before the restart. Module code edits require this harness restart. Only one harness may own a world's controllers. Ownership uses a loopback lock listener that the OS releases on process exit; a port conflict refuses the run.
 
 Closing a character tab records unavailability while other agents continue. Restore it using clients start with the same experiment. New state must arrive before another request/action can proceed.
 
@@ -135,7 +119,9 @@ To add a third module, create agents/YOUR_NAME.ts, register it in src/run.ts def
 
 Agent memory is revisioned plan/beliefs/relationships/nextAction. Game-owned money and inventories cannot be overwritten through memory. History deliberately exposes private memory revisions and reduced action outcomes; full operator traces are not searchable by models. A policy change cannot erase information already stored in an agent's own memory.
 
-Tools require exact observed references and a recent observation stamp. Changed slots, entities, dialogue pages, or trade offers are refused. A trade acceptance approves one screen only. “Dispatched” means sent to the client; it is not proof of a completed game effect.
+Tools require exact observed references and a recent observation stamp. Changed slots, entities, dialogue pages, or trade offers are refused. Drop targets an exact inventory slot and supports whole stacks only; partial-stack drops are refused because the SDK primitive drops the complete slot. Primitive dispatch revalidates live targets and the experiment freshness limit immediately before sending. A trade acceptance approves one screen only. “Dispatched” means sent to the client; it is not proof of a completed game effect.
+
+Context includes at most 20 pending-action summaries. Agents can page `pending_actions` and call `inspect_action` to inspect their own policy-filtered intent against fresh observations. A matching postcondition can resolve an action without replaying it; this records observed state, not causal proof that the particular action produced it. Unsupported or ambiguous outcomes remain uncertain.
 
 ## Inspect traces and acceptance
 
@@ -145,7 +131,7 @@ For each agent, runs/RUN_ID/agents/WORLD_ID/AGENT_ID contains:
 - REQUEST_ID.json: actual serialized Pi Context, tool schemas, non-secret options, model, and observation/profile revision.
 - PNG files: operator-requested or best-effort failure captures, with honest capture timestamps.
 
-SQLite is the recovery source. Intent is committed before a game effect, and context is written before provider dispatch. Incomplete final JSONL lines are recoverable; interior corruption stops export. Artifact quota includes SQLite/WAL and screenshots; new work stops when it cannot be recorded.
+SQLite is the recovery source. Concurrent CLI and harness exports serialize through a database write lock so event sequences cannot overlap. Credentials are redacted in the recovery journal as well as exported artifacts. Intent is committed before a game effect, and context is written before provider dispatch. Incomplete final JSONL lines are recoverable; interior corruption stops export. Artifact quota includes SQLite/WAL and screenshots; new work stops when it cannot be recorded.
 
 For the demo, edit instructions during the run, restart/resume the harness, and close/restore one tab. Capture a screenshot and inspect every agent's saved context. Then validate the preserved evidence:
 

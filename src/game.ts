@@ -163,6 +163,18 @@ function validate(a: GameAction, s: RawState): void {
       (x) => x.slot === a.item.slot && x.id === a.item.id,
     );
     if (!item) throw new Error("item reference changed");
+    if (a.kind === "drop" && a.count !== item.count)
+      throw new Error("drop requires the entire selected stack");
+    if (a.kind === "eat" || a.kind === "equip") {
+      const pattern = a.kind === "eat" ? /^eat$/i : /^(wear|wield|equip)$/i;
+      if (
+        !(
+          item.optionsWithIndex as
+            { text: string; opIndex: number }[] | undefined
+        )?.some((o) => pattern.test(o.text))
+      )
+        throw new Error("item option unavailable");
+    }
     if (
       "count" in a &&
       (!Number.isSafeInteger(a.count) || a.count < 1 || a.count > item.count)
@@ -198,6 +210,17 @@ function validate(a: GameAction, s: RawState): void {
             (a.kind === "pickup" || x.level === a.target.level)),
     );
     if (!match) throw new Error("target reference changed");
+    if (
+      ["attack", "shop_open", "interact_npc"].includes(a.kind) ||
+      (a.kind === "gather" && a.skill === "fish")
+    ) {
+      if (a.target.index === undefined) throw new Error("NPC index required");
+    }
+    if (a.kind === "attack" || a.kind === "shop_open") {
+      const pattern = a.kind === "attack" ? /^attack$/i : /trade/i;
+      if (!match.optionsWithIndex?.some((o) => pattern.test(o.text)))
+        throw new Error("NPC option unavailable");
+    }
     if (
       "option" in a &&
       !match.optionsWithIndex?.some((o) => o.opIndex === a.option)
@@ -328,9 +351,9 @@ export function createGame(
               ? r.phase === "completion"
                 ? "completed"
                 : "dispatched"
-              : r.reason === "timeout"
-                ? "uncertain"
-                : "failed",
+              : r.phase === "validation"
+                ? "failed"
+                : "uncertain",
             message: r.success
               ? "Action sent; inspect fresh state for its effect."
               : "Action did not confirm success.",
@@ -363,6 +386,7 @@ export async function connectGame(
   key: AgentKey,
   account: { username: string; password: string },
   world: { gatewayUrl: string },
+  freshnessMs = 3000,
 ): Promise<GameClient> {
   localUrl(world.gatewayUrl, ["ws:"]);
   const sdkPath = new URL("../vendor/rs-sdk/sdk/index.ts", import.meta.url)
@@ -392,23 +416,52 @@ export async function connectGame(
     actionTimeout: 30000,
   });
   const bot = new BotActions(sdk);
-  let seq = 0;
-  sdk.onStateUpdate(() => seq++);
   try {
     await sdk.connect();
   } catch (e) {
     await sdk.disconnect();
     throw e;
   }
-  const game = createGame({
+  const game = createGame(
+    sdkTransport(sdk, bot, executionContext, freshnessMs),
+    freshnessMs,
+  );
+  game.prepare = async (signal) => {
+    const result = await executionContext.run({ signal }, () =>
+      bot.skipTutorial({ randomizeAppearance: false }),
+    );
+    if (!result.success) throw new Error("tutorial preparation failed");
+  };
+  return game;
+}
+
+// SDK bindings are injected here so adapter semantics can be tested without a live client.
+export function sdkTransport(
+  sdk: any,
+  bot: any,
+  executionContext: any,
+  freshnessMs = 3000,
+): Transport {
+  let seq = 0;
+  sdk.onStateUpdate(() => seq++);
+  return {
     snapshot: () => ({
       raw: sdk.getState(),
       receivedAt: sdk.getStateReceivedAt() ?? 0,
       seq,
     }),
     close: () => sdk.disconnect(),
-    dispatch: (a, s, signal) =>
+    dispatch: (a, _snapshot, signal) =>
       executionContext.run({ signal }, async () => {
+        const s = sdk.getState() as RawState;
+        try {
+          signal.throwIfAborted();
+          if (!s || Date.now() - (sdk.getStateReceivedAt() ?? 0) > freshnessMs)
+            throw new Error("stale state");
+          validate(a, s);
+        } catch {
+          return { success: false, phase: "validation" };
+        }
         const item =
           "item" in a
             ? (a.kind === "bank_withdraw"
@@ -422,7 +475,13 @@ export async function connectGame(
             : undefined;
         const entity =
           "target" in a
-            ? [...s.nearbyNpcs, ...s.nearbyLocs, ...s.groundItems].find(
+            ? (a.kind === "pickup"
+                ? s.groundItems
+                : ["attack", "shop_open", "interact_npc"].includes(a.kind) ||
+                    (a.kind === "gather" && a.skill === "fish")
+                  ? s.nearbyNpcs
+                  : s.nearbyLocs
+              ).find(
                 (x) =>
                   x.id === a.target.id &&
                   (a.target.index !== undefined
@@ -450,9 +509,9 @@ export async function connectGame(
           case "trade_decline":
             return sdk.sendDeclineTrade();
           case "drop":
-            return bot.dropItem(item, a.count);
+            return sdk.sendDropItem(a.item.slot);
           case "pickup":
-            return bot.pickupItem(entity);
+            return sdk.sendPickup(a.target.x, a.target.z, a.target.id);
           case "interact_npc":
             return sdk.sendInteractNpc(a.target.index, a.option);
           case "interact_loc":
@@ -469,45 +528,67 @@ export async function connectGame(
           case "bank_open":
             return bot.openBank();
           case "bank_deposit":
-            return bot.depositItem(item, a.count);
+            return sdk.sendBankDeposit(a.item.slot, a.count);
           case "bank_withdraw":
-            return bot.withdrawItem(item, a.count);
+            return sdk.sendBankWithdraw(a.item.slot, a.count);
           case "shop_open":
-            return bot.openShop(entity);
+            return sdk.sendInteractNpc(
+              a.target.index,
+              entity!.optionsWithIndex!.find((o) => /trade/i.test(o.text))!
+                .opIndex,
+            );
           case "shop_buy":
-            return bot.buyFromShop(item, a.count);
+            return sdk.sendShopBuy(a.item.slot, a.count);
           case "shop_sell":
-            return bot.sellToShop(item, a.count);
+            return sdk.sendShopSell(a.item.slot, a.count);
           case "equip":
-            return bot.equipItem(item);
+            return sdk.sendUseItem(
+              a.item.slot,
+              (
+                item!.optionsWithIndex as { text: string; opIndex: number }[]
+              ).find((o) => /^(wear|wield|equip)$/i.test(o.text))!.opIndex,
+            );
           case "unequip":
-            return bot.unequipItem(item);
+            return sdk.sendUseEquipmentItem(a.item.slot, 1);
           case "eat":
-            return bot.eatFood(item);
+            return sdk.sendUseItem(
+              a.item.slot,
+              (
+                item!.optionsWithIndex as { text: string; opIndex: number }[]
+              ).find((o) => /^eat$/i.test(o.text))!.opIndex,
+            );
           case "attack":
-            return bot.attack(entity);
+            return sdk.sendInteractNpc(
+              a.target.index,
+              entity!.optionsWithIndex!.find((o) => /^attack$/i.test(o.text))!
+                .opIndex,
+            );
           case "gather": {
             const bounded = AbortSignal.any([
               signal,
               AbortSignal.timeout(a.durationSeconds * 1000),
             ]);
             return executionContext.run({ signal: bounded }, async () => {
-              if (a.skill === "chop") return bot.chopTree(entity);
-              if (a.skill === "mine")
-                return bot.mineRock(entity, {
-                  timeout: a.durationSeconds * 1000,
-                });
-              return sdk.sendInteractNpc(a.target.index, a.option);
+              const before = s.inventory.reduce((sum, i) => sum + i.count, 0);
+              const sent =
+                a.skill === "fish"
+                  ? await sdk.sendInteractNpc(a.target.index, a.option)
+                  : await sdk.sendInteractLoc(
+                      a.target.x,
+                      a.target.z,
+                      a.target.id,
+                      a.option,
+                    );
+              if (!sent.success) return sent;
+              await sdk.waitForCondition(
+                (state: RawState) =>
+                  state.inventory.reduce((sum, i) => sum + i.count, 0) > before,
+                a.durationSeconds * 1000,
+              );
+              return { success: true, phase: "completion" };
             });
           }
         }
       }),
-  });
-  game.prepare = async (signal) => {
-    const result = await executionContext.run({ signal }, () =>
-      bot.skipTutorial({ randomizeAppearance: false }),
-    );
-    if (!result.success) throw new Error("tutorial preparation failed");
   };
-  return game;
 }

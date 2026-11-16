@@ -138,6 +138,32 @@ export async function readManifest(
   if (m.runId !== id) throw new Error("run identity mismatch");
   return m;
 }
+export function summarizeAgent(
+  store: Store,
+  key: AgentKey,
+): RunReport["agents"][string] {
+  const summary = { tasks: 0, requests: 0, tools: 0, failures: 0, reason: "" };
+  let after = 0;
+  for (;;) {
+    const events = store.events(key, after, 1000);
+    if (!events.length) return summary;
+    for (const e of events)
+      if (e.type === "task_finished") {
+        const d = e.data as {
+          requests: number;
+          tools: number;
+          status: string;
+          reason: string;
+        };
+        summary.tasks++;
+        summary.requests += d.requests;
+        summary.tools += d.tools;
+        if (d.status !== "completed") summary.failures++;
+        summary.reason = d.reason;
+      }
+    after = events.at(-1)!.seq;
+  }
+}
 export async function startRun(
   experiment: Experiment,
   options: { resumeRunId?: string; signal?: AbortSignal; root?: string } = {},
@@ -208,13 +234,11 @@ export async function startRun(
       agents: {},
     };
     for (const a of experiment.agents)
-      report.agents[a.id] = {
-        tasks: 0,
-        requests: 0,
-        tools: 0,
-        failures: 0,
-        reason: "",
-      };
+      report.agents[a.id] = summarizeAgent(store, {
+        runId,
+        worldId: world.id,
+        agentId: a.id,
+      });
     const key = (id: string): AgentKey => ({
       runId,
       worldId: world.id,
@@ -235,7 +259,12 @@ export async function startRun(
     ]);
     const connected = await Promise.allSettled(
       accounts.map(async (account) => {
-        const game = await connectGame(key(account.agentId), account, world);
+        const game = await connectGame(
+          key(account.agentId),
+          account,
+          world,
+          experiment.limits.freshnessMs,
+        );
         games.set(account.agentId, game);
         await game.ready(prep);
         if (!manifest.startedAt) await game.prepare?.(prep);

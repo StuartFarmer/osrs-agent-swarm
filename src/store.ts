@@ -52,6 +52,7 @@ export function validateMemory(value: unknown, maxBytes = 16384): Memory {
 export class Store {
   readonly db: DatabaseSync;
   guard: (extraBytes: number) => void = () => {};
+  sanitizeEvent: (event: EventInput) => EventInput = (event) => event;
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db
@@ -63,11 +64,17 @@ export class Store {
       CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,scope TEXT NOT NULL,reserved REAL NOT NULL,actual REAL); `);
   }
   private transaction<T>(bytes: number, work: () => T): T {
-    this.guard(bytes + 65536);
+    return this.exclusive(() => {
+      this.guard(bytes + 65536);
+      const result = work();
+      this.guard(0);
+      return result;
+    });
+  }
+  exclusive<T>(work: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = work();
-      this.guard(0);
       this.db.exec("COMMIT");
       return result;
     } catch (e) {
@@ -77,7 +84,7 @@ export class Store {
   }
   private event(key: AgentKey, event: EventInput): JournalEvent {
     const time = new Date().toISOString();
-    const value = { ...event, ...key, time };
+    const value = { ...this.sanitizeEvent(event), ...key, time };
     const r = this.db
       .prepare("INSERT INTO events(scope,value) VALUES(?,?)")
       .run(scope(key), JSON.stringify(value));
@@ -165,6 +172,20 @@ export class Store {
         intent: JSON.parse(r.intent as string),
         outcome: r.outcome ? JSON.parse(r.outcome as string) : null,
       }));
+  }
+  readAction(key: AgentKey, id: string) {
+    const r = this.db
+      .prepare("SELECT id,intent,outcome FROM actions WHERE scope=? AND id=?")
+      .get(scope(key), id);
+    return r
+      ? {
+          actionId: r.id as string,
+          intent: JSON.parse(r.intent as string) as JsonValue,
+          outcome: r.outcome
+            ? (JSON.parse(r.outcome as string) as ActionOutcome)
+            : null,
+        }
+      : null;
   }
   reserve(key: AgentKey, id: string, upperUsd: number, capUsd: number): void {
     identifier(id);

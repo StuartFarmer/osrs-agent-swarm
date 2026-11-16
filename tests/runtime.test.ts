@@ -17,6 +17,7 @@ import { runTask } from "../src/runtime.ts";
 import { gatherer } from "../agents/gatherer.ts";
 import { createGame } from "../src/game.ts";
 import { loadExperiment } from "../src/config.ts";
+import { setTimeout as delay } from "node:timers/promises";
 const key = { runId: "r", worldId: "w", agentId: "a" };
 const model: Model<Api> = {
   id: "script",
@@ -249,4 +250,79 @@ test("context ceiling and failed trace block provider dispatch and settle local 
   assert.equal(calls, 0);
   assert.equal(r2.status, "failed");
   assert.equal(deps.store.spending(), 0);
+});
+
+test("aborting a task holds inference admission until the source stream settles", async (t) => {
+  const deps = await setup(t),
+    gate = new Gate(1, deps.store),
+    controller = new AbortController();
+  const source = createAssistantMessageEventStream();
+  let started!: () => void;
+  const dispatch = new Promise<void>((resolve) => (started = resolve));
+  const task = runTask(
+    {
+      ...deps,
+      gate,
+      provider: {
+        model,
+        upperUsd: 0,
+        capUsd: 0,
+        stream: () => {
+          started();
+          return source;
+        },
+      },
+    },
+    controller.signal,
+  );
+  await dispatch;
+  controller.abort();
+  let admitted = false;
+  const next = gate
+    .acquire(key, "after-cancel", 0, 0, new AbortController().signal)
+    .then((lease) => {
+      admitted = true;
+      return lease;
+    });
+  await delay(20);
+  assert.equal(admitted, false);
+  const final = await response([]).result();
+  source.push({ type: "done", reason: "stop", message: final });
+  const result = await task;
+  assert.equal(result.status, "aborted");
+  (await next).finish(0);
+});
+
+test("task deadline cancels a stalled context hook before dispatch and releases admission", async (t) => {
+  const deps = await setup(t),
+    gate = new Gate(1, deps.store);
+  let calls = 0;
+  const task = runTask(
+    {
+      ...deps,
+      gate,
+      limits: { ...deps.limits, taskSeconds: 0.02 },
+      definition: { ...gatherer, buildContext: () => new Promise(() => {}) },
+      provider: {
+        model,
+        upperUsd: 0,
+        capUsd: 0,
+        stream: () => {
+          calls++;
+          return response([]);
+        },
+      },
+    },
+    new AbortController().signal,
+  );
+  const result = await Promise.race([task, delay(200).then(() => null)]);
+  assert.ok(
+    result,
+    "a stalled context hook must not hang the shared task loop",
+  );
+  assert.equal(result.status, "aborted");
+  assert.equal(calls, 0);
+  (
+    await gate.acquire(key, "after-hook", 0, 0, new AbortController().signal)
+  ).finish(0);
 });

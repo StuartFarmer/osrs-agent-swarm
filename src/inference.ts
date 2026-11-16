@@ -93,6 +93,7 @@ export type Provider = {
   stream: StreamFn;
   upperUsd: number;
   capUsd: number;
+  requestSettings?: Record<string, unknown>;
 };
 export function usageCost(
   usage: Usage,
@@ -109,10 +110,15 @@ export function createProvider(
   config: ModelConfig,
   outputTokens = 2048,
 ): Provider {
-  if (config.provider !== "openai-compatible")
+  if (!["openai-compatible", "openrouter"].includes(config.provider))
     throw new Error(
-      "POC supports provider=openai-compatible (Chat Completions with bounded token billing)",
+      "POC supports openai-compatible or openrouter Chat Completions",
     );
+  if (
+    config.provider === "openrouter" &&
+    config.baseUrl !== "https://openrouter.ai/api/v1"
+  )
+    throw new Error("OpenRouter requires its explicit official API endpoint");
   const apiKey = process.env[config.apiKeyEnv];
   if (!apiKey)
     throw new Error(
@@ -138,8 +144,25 @@ export function createProvider(
   const api = lazyApi(
     () => import("@earendil-works/pi-ai/api/openai-completions"),
   );
+  const requestSettings =
+    config.provider === "openrouter"
+      ? {
+          reasoning: { enabled: false },
+          provider: {
+            allow_fallbacks: false,
+            require_parameters: true,
+            sort: "price",
+            max_price: {
+              prompt: config.rates.input,
+              completion: config.rates.output,
+              request: 0,
+            },
+          },
+        }
+      : undefined;
   return {
     model,
+    requestSettings,
     capUsd: config.costLimitUsd,
     upperUsd:
       (config.contextWindow *
@@ -151,6 +174,18 @@ export function createProvider(
         outputTokens * config.rates.output) /
       1000000,
     stream: (m, c, o) =>
-      api.streamSimple(m, c, { ...o, apiKey, maxRetries: 0 }),
+      api.streamSimple(m, c, {
+        ...o,
+        apiKey,
+        maxRetries: 0,
+        ...(requestSettings
+          ? {
+              onPayload: (payload: unknown) => ({
+                ...(payload as Record<string, unknown>),
+                ...requestSettings,
+              }),
+            }
+          : {}),
+      }),
   };
 }

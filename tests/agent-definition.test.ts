@@ -117,4 +117,19 @@ test("excluded chat and other agent data stay out of state, history and action t
     }),
     /revision/,
   );
+  const smallMemoryTool = createTools(key, game, s, trace, gatherer, 256).find(
+    (t) => t.name === "update_memory",
+  )!;
+  await assert.rejects(
+    smallMemoryTool.execute("small", {
+      expectedRevision: 1,
+      value: {
+        plan: ["x".repeat(500)],
+        beliefs: [],
+        relationships: {},
+        nextAction: "",
+      },
+    }),
+    /size/,
+  );
 });
