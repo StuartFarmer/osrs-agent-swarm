@@ -21,6 +21,8 @@ export type WorldHandle = {
 };
 export type OwnedProcess = { pid: number; token: string; script: string };
 export const worldEnv = {
+  // Upstream's custom content changes the original cache checksums (server/Dockerfile).
+  BUILD_VERIFY: "false",
   EASY_STARTUP: "true",
   NODE_TICKRATE: "400",
   NODE_XPRATE: "1",

@@ -27,6 +27,8 @@ rtk proxy env SWARM_LIVE_GAME=1 SWARM_SMOKE_WORLD=m1smoke node --import tsx --te
 
 Creation clones the pinned vendor checkout, installs frozen upstream dependencies, runs the SQLite migration and builds, and checks effective 400 ms / 1x XP settings. It refuses an existing world directory. Failed preparation leaves files for diagnosis; use a new world ID rather than deleting saves.
 
+The launcher sets `BUILD_VERIFY=false` for builds and runtime repacking, matching the pinned upstream Dockerfile: RS-SDK's custom content differs from the original cache checksums. The Git revision check and packer validation still run. If an older launcher left an incomplete world after a checksum error, preserve that directory under another name before recreating the original world ID.
+
 The disposable copy receives explicit loopback listener patches. The web transport worker is disabled for this POC so the audited loopback listener handles web traffic. The vendor and reference checkouts are unchanged. Startup commands and migrations remain **unverified against a running engine** until the above smoke test succeeds.
 
 The smoke test creates three rendered characters, skips the tutorial, and checks public chat, private-message recipient isolation, follow/stop, inventory deltas from a two-sided trade, and drop/pickup. It records observations, action journals, and a screenshot. No LLM is used. An ordinary gathering/banking/shop route still needs live calibration and verification; tool presence alone is not that proof.
