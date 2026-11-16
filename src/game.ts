@@ -467,7 +467,7 @@ export async function prepareCharacter(
     await game.ready(signal);
     if (!needsTutorial()) return;
     const result = await executionContext.run({ signal }, () =>
-      bot.skipTutorial({ randomizeAppearance: false }),
+      bot.skipTutorial({ randomizeAppearance: true }),
     );
     if (!result.success)
       throw new Error(

@@ -17,4 +17,6 @@ test("CLI help describes the operator commands", () => {
   assert.equal(r.status, 0);
   assert.match(r.stdout, /memory/);
   assert.match(r.stdout, /capture/);
+  assert.match(r.stdout, /record --run/);
+  assert.match(r.stdout, /--record/);
 });

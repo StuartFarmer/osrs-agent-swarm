@@ -5,15 +5,22 @@ import { randomUUID } from "node:crypto";
 import { loadExperiment, identifier } from "./config.ts";
 import { prepareWorld, startWorld, stopWorld, readWorld } from "./world.ts";
 import { startBrowser, attachBrowser, accountsFor } from "./browser.ts";
-import { startRun, readManifest, runDirectory } from "./run.ts";
+import {
+  startRun,
+  readManifest,
+  runDirectory,
+  acquireWorldLock,
+} from "./run.ts";
 import { Store } from "./store.ts";
 import { validateMemory } from "./store.ts";
 import { Trace } from "./trace.ts";
+import { recordSession, verifyRecorder } from "./recording.ts";
 import { checkAcceptance } from "./acceptance.ts";
 const help = `RuneScape swarm POC (run from the repository root)
   world create|start|stop WORLD_ID
   clients start --experiment experiments/m1.json
-  run --experiment experiments/m1.json [--resume RUN_ID]
+  run --experiment experiments/m1.json [--resume RUN_ID] [--record]
+  record --run RUN_ID
   status --run RUN_ID
   memory get|set --run RUN_ID --agent AGENT_ID [--expected-revision N --file memory.json]
   focus --run RUN_ID --agent AGENT_ID
@@ -27,6 +34,7 @@ async function main(): Promise<number> {
     allowPositionals: true,
     options: {
       experiment: { type: "string" },
+      record: { type: "boolean", default: false },
       resume: { type: "string" },
       run: { type: "string" },
       agent: { type: "string" },
@@ -76,6 +84,7 @@ async function main(): Promise<number> {
       const report = await startRun(e, {
         resumeRunId: values.resume,
         signal: controller.signal,
+        record: values.record,
       });
       print(report);
       return report.status === "completed" ? 0 : 2;
@@ -132,6 +141,45 @@ async function main(): Promise<number> {
           };
         }),
       });
+      return 0;
+    }
+    if (command === "record") {
+      if (!manifest.deadline || Date.now() >= manifest.deadline)
+        throw new Error(
+          "Run must have finished preparation and still be active to record",
+        );
+      await verifyRecorder();
+      const release = await acquireWorldLock("recording:" + dir);
+      const controller = new AbortController(),
+        stop = () => controller.abort();
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+      let browser;
+      try {
+        const world = await readWorld(manifest.worldId),
+          accounts = await accountsFor(world, manifest.experiment.agents);
+        browser = await attachBrowser(world, accounts);
+        print(
+          await recordSession({
+            dir,
+            runId: manifest.runId,
+            worldId: manifest.worldId,
+            agents: accounts,
+            browser,
+            deadline: manifest.deadline,
+            signal: controller.signal,
+            checkQuota: () => trace.check(),
+          }),
+        );
+      } finally {
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
+        try {
+          await browser?.close();
+        } finally {
+          await release();
+        }
+      }
       return 0;
     }
     const agentId = identifier(values.agent);

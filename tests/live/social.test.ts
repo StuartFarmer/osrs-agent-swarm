@@ -125,7 +125,8 @@ test(
         checks.dmIsolation = true;
 
         const bob = state(0).nearbyPlayers.find(
-          (p) => p.name.toLowerCase() === accounts[1].username,
+          (p) =>
+            p.name.toLowerCase().replaceAll(" ", "_") === accounts[1].username,
         )!;
         const before = state(0).player!;
         await act(0, {
@@ -174,7 +175,9 @@ test(
 
         const peer = (i: number, j: number) => {
           const p = state(i).nearbyPlayers.find(
-            (x) => x.name.toLowerCase() === accounts[j].username,
+            (x) =>
+              x.name.toLowerCase().replaceAll(" ", "_") ===
+              accounts[j].username,
           );
           assert.ok(p);
           return { index: p.index, name: p.name };

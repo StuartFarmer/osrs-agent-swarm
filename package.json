@@ -8,7 +8,8 @@
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test",
+    "test:names": "python3 -m unittest discover -s scripts -p 'test_collect_hiscore_names.py'",
+    "check": "npm run typecheck && npm test && npm run test:names",
     "swarm": "node --import tsx src/cli.ts"
   },
   "dependencies": {

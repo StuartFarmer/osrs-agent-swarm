@@ -1,19 +1,26 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { localUrl } from "./config.ts";
 import { ownsProcess, spawnOwned, stopOwned, writeJson } from "./world.ts";
 import type { WorldHandle, OwnedProcess } from "./world.ts";
 import type { AgentEntry } from "./types.ts";
-export type Account = { agentId: string; username: string; password: string };
+import { allocateNames, hasCollectedNames } from "./names.ts";
+export type Account = {
+  agentId: string;
+  username: string;
+  password: string;
+  displayName?: string;
+};
 type Page = {
   url(): string;
   goto(url: string, options?: unknown): Promise<unknown>;
   close(): Promise<void>;
   bringToFront(): Promise<void>;
   screenshot(options: unknown): Promise<Uint8Array>;
+  evaluate<T, A>(work: (arg: A) => T, arg: A): Promise<T>;
   isClosed(): boolean;
 };
 type Browser = {
@@ -24,12 +31,15 @@ type Browser = {
 export type BrowserHandle = {
   focus(agentId: string): Promise<void>;
   capture(agentId: string): Promise<Buffer>;
+  captureGame(agentId: string, label: string): Promise<Buffer>;
   connected(agentId: string): Promise<boolean>;
   close(): Promise<void>;
 };
 export async function accountsFor(
   world: WorldHandle,
   agents: AgentEntry[],
+  namePool = process.env.SWARM_NAMES_DB ??
+    resolve(".local/hiscores/names.sqlite"),
 ): Promise<Account[]> {
   const path = join(world.dir, "accounts.json");
   if (existsSync(path)) {
@@ -38,7 +48,9 @@ export async function accountsFor(
       accounts.length !== agents.length ||
       accounts.some(
         (a, i) =>
-          a.agentId !== agents[i].id || !/^[a-z0-9]{1,12}$/.test(a.username),
+          a.agentId !== agents[i].id ||
+          !/^[a-z0-9][a-z0-9_]{0,11}$/.test(a.username) ||
+          a.username.endsWith("_"),
       )
     )
       throw new Error("account roster mismatch");
@@ -56,9 +68,27 @@ export async function accountsFor(
     return accounts;
   }
   const prefix = randomBytes(3).toString("hex");
-  const accounts = agents.map((a, i) => ({
-    agentId: a.id,
-    username: "s" + prefix + String(i + 1).padStart(2, "0"),
+  if (process.env.SWARM_NAMES_DB && !existsSync(namePool))
+    throw new Error("configured name pool does not exist");
+  const usePool = existsSync(namePool) && hasCollectedNames(namePool);
+  if (process.env.SWARM_NAMES_DB && !usePool)
+    throw new Error("configured name pool contains no collected names");
+  const identities = usePool
+    ? allocateNames(
+        namePool,
+        resolve(world.dir),
+        agents.map((a) => a.id),
+      )
+    : agents.map((a, i) => ({
+        agentId: a.id,
+        username: "s" + prefix + String(i + 1).padStart(2, "0"),
+      }));
+  if (!usePool)
+    console.error(
+      "[names] No collected name pool yet; using synthetic names for this new roster.",
+    );
+  const accounts = identities.map((identity) => ({
+    ...identity,
     password: randomBytes(10).toString("hex"),
   }));
   await writeFile(path, JSON.stringify(accounts, null, 2), {
@@ -172,6 +202,10 @@ export async function attachBrowser(
     focus: async (id) => (await page(id)).bringToFront(),
     capture: async (id) =>
       Buffer.from(await (await page(id)).screenshot({ type: "png" })),
+    captureGame: async (id, label) => {
+      const data = await (await page(id)).evaluate(gameCanvasFrame, label);
+      return Buffer.from(data.split(",")[1], "base64");
+    },
     connected: async (id) => {
       try {
         return !(await page(id)).isClosed();
@@ -181,6 +215,23 @@ export async function attachBrowser(
     },
     close: () => browser.disconnect(),
   };
+}
+export function gameCanvasFrame(label: string): string {
+  const game = document.querySelector<HTMLCanvasElement>("#canvas");
+  if (!game || !game.width || !game.height)
+    throw new Error("Game canvas is not ready for recording");
+  const frame = document.createElement("canvas");
+  frame.width = game.width;
+  frame.height = game.height + 42;
+  const context = frame.getContext("2d");
+  if (!context) throw new Error("Cannot create recording frame");
+  context.fillStyle = "black";
+  context.fillRect(0, 0, frame.width, frame.height);
+  context.drawImage(game, 0, 42);
+  context.fillStyle = "white";
+  context.font = "16px sans-serif";
+  context.fillText(label, 10, 26, Math.max(1, frame.width - 180));
+  return frame.toDataURL("image/jpeg", 0.8);
 }
 export async function startBrowser(
   world: WorldHandle,

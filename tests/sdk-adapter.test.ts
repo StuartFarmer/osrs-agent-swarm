@@ -215,3 +215,24 @@ test("tutorial preparation checks arrival on mainland after partial helper succe
     "closing one dialog must not count as finishing the tutorial",
   );
 });
+
+test("initial character preparation requests randomized appearance", async () => {
+  const f = fixture();
+  f.raw.player.worldX = 3095;
+  f.raw.player.worldZ = 3107;
+  let randomized = false;
+  await prepareCharacter(
+    f.game,
+    {
+      skipTutorial: async (options) => {
+        randomized = options.randomizeAppearance;
+        f.raw.player.worldX = 3222;
+        f.raw.player.worldZ = 3218;
+        return { success: true };
+      },
+    },
+    { run: <T>(_context: unknown, work: () => T) => work() },
+    new AbortController().signal,
+  );
+  assert.equal(randomized, true);
+});

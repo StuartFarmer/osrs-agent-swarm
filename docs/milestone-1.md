@@ -1,10 +1,10 @@
 # Milestone 1 runbook
 
-The goal is ten visible agents with independently programmable observations, memory, and context construction. The current implementation has preliminary offline coverage; it has not yet run a local game or a paid model. Do not treat the acceptance checker or skipped live tests as proof of a functioning swarm.
+The goal is ten visible agents with independently programmable observations, memory, and context construction. The operator's three-character social smoke passed; the paid ten-agent milestone run is still pending. Do not treat the acceptance checker or skipped live tests as proof of a functioning swarm.
 
 ## Install and verify
 
-Use Node 24 and Bun >=1.3.14. From this checkout:
+Use Node 24, Bun >=1.3.14, and Python 3.10+. Recording and its media tests also require FFmpeg (with libx264 and drawtext) and ffprobe on PATH; on macOS install these with `brew install ffmpeg`. From this checkout:
 
 ```sh
 rtk git submodule update --init --recursive vendor/rs-sdk
@@ -13,7 +13,7 @@ rtk proxy sh -c 'cd vendor/rs-sdk && bun install --frozen-lockfile'
 rtk npm run check
 ```
 
-A package lock must be generated and checked in after a successful installation; this environment could not reach npm or GitHub from the shell. The submodule revision is 3aa493c3d26680df5bae2b475cc1805e3db05ae3. The compatibility test requires Node 24 and imports the actual SDK and Pi. Live runs reject the wrong Node/Pi versions.
+The operator-generated package lock is present but remains untracked pending review. The submodule revision is 3aa493c3d26680df5bae2b475cc1805e3db05ae3. The compatibility test requires Node 24 and imports the actual SDK and Pi. Live runs reject the wrong Node/Pi versions.
 
 Puppeteer downloads a browser during installation. To use an existing Chromium instead, install with PUPPETEER_SKIP_DOWNLOAD=true and set CHROMIUM_PATH to its executable when starting clients. On this machine that executable is /Applications/Chromium.app/Contents/MacOS/Chromium.
 
@@ -29,11 +29,13 @@ Creation clones the pinned vendor checkout, installs frozen upstream dependencie
 
 The launcher sets `BUILD_VERIFY=false` for builds and runtime repacking, matching the pinned upstream Dockerfile: RS-SDK's custom content differs from the original cache checksums. The Git revision check and packer validation still run. If an older launcher left an incomplete world after a checksum error, preserve that directory under another name before recreating the original world ID.
 
-The disposable copy receives explicit loopback listener patches and a guarded gateway status field exposing its login-server connection. `world start` waits for that connection before returning; it upgrades existing managed world copies on their next start. The web transport worker is disabled for this POC so the audited loopback listener handles web traffic. The vendor and reference checkouts are unchanged. Startup commands and migrations remain **unverified against a running engine** until the above smoke test succeeds.
+The disposable copy receives explicit loopback listener patches and a guarded gateway status field exposing its login-server connection. `world start` waits for that connection before returning; it upgrades existing managed world copies on their next start. The web transport worker is disabled for this POC so the audited loopback listener handles web traffic. The vendor and reference checkouts are unchanged. The operator has now passed the social smoke against a running world; fresh setup remains blocked inside the coding sandbox.
 
 The smoke test prints `[browser]` and `[smoke]` progress as Chrome starts, each tab opens, and each character connects. A cold Chrome launch may take up to 60 seconds before tabs open. Startup failures release the world lock so the test can exit.
 
 Preparation accepts characters already on the mainland. For characters still on Tutorial Island, it repeats bounded tutorial steps until the observed location leaves the tutorial area and retains SDK failure details.
+
+New characters receive randomized appearance through the upstream tutorial helper when the creation interface is open. Existing characters keep their appearance. Random selection makes agents easier to distinguish but does not guarantee every outfit is unique; video labels identify the agent regardless.
 
 The smoke test creates three rendered characters, skips the tutorial, and checks public chat, private-message recipient isolation, follow/stop, inventory deltas from a two-sided trade, and drop/pickup. It records observations, action journals, and a screenshot. No LLM is used. An ordinary gathering/banking/shop route still needs live calibration and verification; tool presence alone is not that proof.
 
@@ -47,6 +49,21 @@ rtk npm run swarm -- clients start --experiment experiments/openrouter-m1.json
 ```
 
 The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 43501; run one world at a time. Each world has its own accounts, saves, logs, and browser profile under .local/worlds. The launcher sets `WEBSITE_REGISTRATION=false` so the local login server creates new accounts on first authenticated connection. Generated passwords are 20 characters, matching the game client limit. Existing tabs reload if their stored credentials change. Browser connections are separate from SDK controllers. Focusing/capturing a tab does not log in a second client or steal control.
+
+## Collect agent names
+
+Run the standard-library Python collector from this checkout. With no page limit it traverses the discoverable skill and activity categories in the main Old School hiscores instance, following pagination to the end of each category:
+
+```sh
+python3 scripts/collect_hiscore_names.py
+python3 scripts/collect_hiscore_names.py --status
+```
+
+Each page commits deduplicated, game-normalized names and a checkpoint to `.local/hiscores/names.sqlite`. Ctrl-C stops collection; rerun the same command to resume. Categories are visited in rotation, so you get names from different activities early. To collect a bounded initial pool while testing, use `--max-pages 200`, then rerun without the limit for the remainder. Requests are sequential with a minimum two-second delay. HTTP blocks, throttles, malformed pages, and repeated pages stop the collector with its checkpoint retained.
+
+Collect names **before** `clients start` for a new world. New rosters automatically use a populated default pool, reserving names uniquely across worlds. Set `SWARM_NAMES_DB=/absolute/path/names.sqlite` to require a particular pool. Existing `accounts.json` files retain their identities; do not delete them to rename characters. The smoke world's accounts therefore remain unchanged. If the default pool is absent or empty, startup logs that it is using synthetic names; an explicitly configured missing or empty pool fails instead.
+
+This collects public display names, not login identities. Separate seasonal/ironman hiscores instances are outside the requested main leaderboard. Rankings can change during a long crawl, so the result is a deduplicated collection over time, not a simultaneous snapshot or a list of every OSRS account. The parser has fixture coverage, but a live request from this environment failed DNS resolution; no real names have been collected yet. If live markup differs, the collector stops rather than silently claiming completion.
 
 ## Configure inference
 
@@ -84,6 +101,36 @@ Resume retains the original deadline, memory, spending, and uncertain effects; d
 Closing a character tab records unavailability while other agents continue. Restore it using clients start with the same experiment. New state must arrive before another request/action can proceed.
 
 Each task gets at most 8 requests, 16 executed tools, and 120 seconds. Global inference concurrency is 4. Agents share the same tools and scheduling policy. A task starts with a fresh transcript while private memory and selected history persist.
+
+## Record a rotating game video
+
+Start the run with recording enabled:
+
+```sh
+rtk npm run swarm -- run --experiment experiments/openrouter-m1.json --record
+```
+
+Or attach a recorder in another terminal after an existing run finishes character preparation:
+
+```sh
+rtk npm run swarm -- record --run RUN_ID
+```
+
+The recorder focuses each existing game tab for 30 seconds, cycling through all ten for the experiment's remaining duration. Ten agents make a five-minute cycle, repeated six times over a full 30-minute run. All agents continue executing while their tabs are off-screen. The video captures the game canvas at a target 10 fps with agent/name/world labels and an elapsed video clock; it excludes the browser URL and credential fields. Each invocation creates:
+
+```text
+runs/RUN_ID/recordings/recording-UUID/
+  session.mp4
+  timeline.jsonl
+  recording.json
+  encoder.log
+```
+
+The timeline records each agent switch and captured frame with wall-clock timestamps and video offsets, allowing comparison with the agent trace timestamps. Off-screen agents have no video during their gap; their traces still run. This is a visual sample of the experiment, not full-world replay.
+
+Recording ends at the original run deadline. Ctrl-C finishes the current MP4; with `run --record` it also stops the harness, while standalone `record` stops only the recorder. Standalone recording otherwise continues until the saved deadline even if the harness exits early. Resuming with `--record` creates another segment and retains the original run deadline. Only one recorder may own a run. Capture or encoding failures stop an automatically recorded run; they do not silently leave it running without video. Recording bytes count toward the existing artifact quota. Fragmented MP4 preserves completed fragments if the process crashes, though the tail may be incomplete.
+
+Short FFmpeg tests verify playback, rotation, timestamp alignment, and interruption. A full Chrome capture and 30-minute recording still need a live check.
 
 ## Customize agent code
 

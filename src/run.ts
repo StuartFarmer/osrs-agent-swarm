@@ -17,6 +17,8 @@ import { readWorld, writeJson, SDK_REVISION } from "./world.ts";
 import { runTask } from "./runtime.ts";
 import { json } from "./agent-definition.ts";
 import { merchant } from "../agents/merchant.ts";
+import { recordSession, verifyRecorder } from "./recording.ts";
+import type { RecordingResult } from "./recording.ts";
 import { gatherer } from "../agents/gatherer.ts";
 export const definitions = { merchant, gatherer };
 export type RunManifest = {
@@ -35,6 +37,7 @@ export type RunReport = {
   status: "completed" | "incomplete";
   elapsedSeconds: number;
   spendingUsd: number;
+  recording?: RecordingResult | { status: "failed"; error: string };
   agents: Record<
     string,
     {
@@ -172,13 +175,19 @@ export function summarizeAgent(
 }
 export async function startRun(
   experiment: Experiment,
-  options: { resumeRunId?: string; signal?: AbortSignal; root?: string } = {},
+  options: {
+    resumeRunId?: string;
+    signal?: AbortSignal;
+    root?: string;
+    record?: boolean;
+  } = {},
 ): Promise<RunReport> {
   if (!experiment.model)
     throw new Error(
       "Explicit model endpoint, credential, tariffs and budget are required; no model calls made",
     );
   verifyRuntime();
+  if (options.record) await verifyRecorder();
   const root = resolve(options.root ?? process.cwd()),
     world = await readWorld(experiment.world.id, root);
   if (
@@ -200,6 +209,8 @@ export async function startRun(
     browser: BrowserHandle | undefined,
     deadlineTimer: ReturnType<typeof setTimeout> | undefined;
   const games = new Map<string, GameClient>();
+  let recording: Promise<void> | undefined;
+  let releaseRecording: (() => Promise<void>) | undefined;
   try {
     const configHash = hash(JSON.stringify(experiment));
     let manifest: RunManifest;
@@ -226,6 +237,9 @@ export async function startRun(
       };
       await writeJson(join(dir, "manifest.json"), manifest);
     }
+    console.error(`[run] ${runId}`);
+    if (options.record)
+      releaseRecording = await acquireWorldLock("recording:" + dir);
     store = new Store(join(dir, "state.sqlite"));
     const trace = new Trace(dir, store, experiment.limits.artifactBytes, [
       process.env[experiment.model.apiKeyEnv] ?? "",
@@ -315,6 +329,29 @@ export async function startRun(
       () => controller.abort(new Error("run deadline")),
       Math.max(0, manifest.deadline! - Date.now()),
     );
+    if (options.record) {
+      recording = recordSession({
+        dir,
+        runId,
+        worldId: world.id,
+        agents: accounts,
+        browser: browser!,
+        deadline: manifest.deadline!,
+        signal,
+        checkQuota: () => trace.check(),
+      })
+        .then((result) => {
+          report.recording = result;
+        })
+        .catch((error) => {
+          report.recording = {
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+          };
+          console.error("[record]", report.recording.error);
+          controller.abort(error);
+        });
+    }
     const tasks = experiment.agents.map(async (a) => {
       let profile = (await reloadProfile(root, a)).profile;
       const moduleHash = hash(
@@ -398,11 +435,13 @@ export async function startRun(
       }
     });
     const settled = await Promise.allSettled(tasks);
+    await recording;
     report.elapsedSeconds = (Date.now() - manifest.startedAt!) / 1000;
     report.spendingUsd = store.spending();
     report.status =
       Date.now() >= manifest.deadline! &&
-      settled.every((r) => r.status === "fulfilled")
+      settled.every((r) => r.status === "fulfilled") &&
+      report.recording?.status !== "failed"
         ? "completed"
         : "incomplete";
     for (const a of experiment.agents) {
@@ -418,6 +457,8 @@ export async function startRun(
   } finally {
     if (deadlineTimer) clearTimeout(deadlineTimer);
     controller.abort();
+    await recording;
+    await releaseRecording?.();
     await Promise.allSettled([...games.values()].map((g) => g.close()));
     await browser?.close();
     store?.close();
