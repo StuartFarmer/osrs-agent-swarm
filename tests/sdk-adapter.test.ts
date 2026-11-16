@@ -174,7 +174,7 @@ test("preparation leaves mainland characters alone and preserves real tutorial f
   const bot = {
     skipTutorial: async () => {
       calls++;
-      return { success: false, message: "No tutorial NPC found" };
+      return { success: false, message: "No Talk option on tutorial NPC" };
     },
   };
   f.raw.player.worldX = 3222;
@@ -185,9 +185,96 @@ test("preparation leaves mainland characters alone and preserves real tutorial f
   f.raw.player.worldZ = 3107;
   await assert.rejects(
     prepareCharacter(f.game, bot, context, signal),
-    /No tutorial NPC found/,
+    /No Talk option on tutorial NPC/,
   );
   assert.equal(calls, 1);
+});
+
+test("preparation tolerates a tutorial guide arriving after the first in-game state", async () => {
+  const f = fixture();
+  f.raw.player.worldX = 3095;
+  f.raw.player.worldZ = 3107;
+  let calls = 0;
+  await prepareCharacter(
+    f.game,
+    {
+      skipTutorial: async () => {
+        if (++calls === 1)
+          return { success: false, message: "No tutorial NPC found" };
+        f.raw.player.worldX = 3222;
+        f.raw.player.worldZ = 3218;
+        return { success: true };
+      },
+    },
+    { run: <T>(_context: unknown, work: () => T) => work() },
+    AbortSignal.timeout(5000),
+  );
+  assert.equal(f.game.observe().raw.player?.worldX, 3222);
+});
+
+test("preparation rechecks mainland arrival when the guide disappears during a skip", async () => {
+  const f = fixture();
+  f.raw.player.worldX = 3095;
+  f.raw.player.worldZ = 3107;
+  await prepareCharacter(
+    f.game,
+    {
+      skipTutorial: async () => {
+        f.raw.player.worldX = 3222;
+        f.raw.player.worldZ = 3218;
+        return { success: false, message: "No tutorial NPC found" };
+      },
+    },
+    { run: <T>(_context: unknown, work: () => T) => work() },
+    AbortSignal.timeout(1000),
+  );
+});
+
+test("waiting for a missing guide remains cancellable", async () => {
+  const f = fixture();
+  f.raw.player.worldX = 3095;
+  f.raw.player.worldZ = 3107;
+  await assert.rejects(
+    prepareCharacter(
+      f.game,
+      {
+        skipTutorial: async () => ({
+          success: false,
+          message: "No tutorial NPC found",
+        }),
+      },
+      { run: <T>(_context: unknown, work: () => T) => work() },
+      AbortSignal.timeout(50),
+    ),
+    { name: "AbortError" },
+  );
+});
+
+test("a guide that never appears fails with character and location diagnostics", async () => {
+  const f = fixture();
+  f.raw.player.worldX = 3095;
+  f.raw.player.worldZ = 3107;
+  await assert.rejects(
+    prepareCharacter(
+      f.game,
+      {
+        skipTutorial: async () => ({
+          success: false,
+          message: "No tutorial NPC found",
+        }),
+      },
+      { run: <T>(_context: unknown, work: () => T) => work() },
+      AbortSignal.timeout(35000),
+    ),
+    (error: any) => {
+      assert.match(error.message, /No tutorial NPC found/);
+      assert.match(error.message, /"name":"a"/);
+      assert.match(error.message, /3095/);
+      assert.match(error.message, /3107/);
+      assert.match(error.message, /nearbyNpcs/);
+      return true;
+    },
+  );
 });
 test("tutorial preparation checks arrival on mainland after partial helper success", async () => {
   const f = fixture(),

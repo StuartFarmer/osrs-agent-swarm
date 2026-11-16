@@ -443,6 +443,19 @@ export async function prepareCharacter(
   },
   signal: AbortSignal,
 ): Promise<void> {
+  const failure = (message: string) => {
+    const { raw, ageMs } = game.observe();
+    return new Error(
+      `tutorial preparation failed: ${message}; state=${JSON.stringify({
+        player: raw.player,
+        ageMs,
+        modalOpen: raw.modalOpen,
+        modalInterface: raw.modalInterface,
+        dialogOpen: raw.dialog.isOpen,
+        nearbyNpcs: raw.nearbyNpcs.map((npc) => npc.name),
+      })}`,
+    );
+  };
   const needsTutorial = () => {
     const o = game.observe(),
       p = o.raw.player;
@@ -463,23 +476,22 @@ export async function prepareCharacter(
       (o.raw.modalOpen === true && o.raw.modalInterface === 3559)
     );
   };
+  let lastMessage = "SDK returned no reason";
   for (let attempt = 0; attempt < 30; attempt++) {
     await game.ready(signal);
     if (!needsTutorial()) return;
     const result = await executionContext.run({ signal }, () =>
       bot.skipTutorial({ randomizeAppearance: true }),
     );
-    if (!result.success)
-      throw new Error(
-        "tutorial preparation failed: " +
-          (result.message ?? "SDK returned no reason"),
-      );
+    lastMessage = result.message ?? "SDK returned no reason";
+    // Login and teleport can publish player state before nearby NPCs arrive.
+    if (!result.success && lastMessage !== "No tutorial NPC found")
+      throw failure(lastMessage);
+    await game.ready(signal);
     if (!needsTutorial()) return;
-    await delay(1000, undefined, { signal });
+    if (attempt < 29) await delay(1000, undefined, { signal });
   }
-  throw new Error(
-    "tutorial preparation did not reach the mainland after 30 steps",
-  );
+  throw failure(`did not reach the mainland after 30 steps (${lastMessage})`);
 }
 
 // SDK bindings are injected here so adapter semantics can be tested without a live client.
