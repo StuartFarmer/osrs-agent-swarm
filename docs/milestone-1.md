@@ -52,7 +52,32 @@ The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 435
 
 ## Collect agent names
 
-Run the standard-library Python collector from this checkout. With no page limit it traverses the discoverable skill and activity categories in the main Old School hiscores instance, following pagination to the end of each category:
+With Docker Desktop running, start the containerized collector from this checkout. Python and the collector's tests are included in the image; no host Python installation is needed:
+
+```sh
+docker compose up --build -d hiscores
+docker compose logs -f hiscores
+```
+
+The service bind-mounts `.local/hiscores` at `/data`, so the database and checkpoints remain on your machine after the container is stopped, removed, or rebuilt. This is the same pool the local swarm reads. The build context contains only the scraper and its tests; game files, credentials, and collected data are not sent to the image build.
+
+Inspect progress, stop, and resume:
+
+```sh
+docker compose run --rm --no-deps hiscores --status
+docker compose stop hiscores
+docker compose up -d hiscores
+```
+
+Stopping sends SIGINT so the collector can close SQLite cleanly. Ctrl-C while following logs only stops the log viewer; use `docker compose stop hiscores` to stop collection. The container exits on completion or an HTTP/parser error and does not automatically retry a blocked website. Check `docker compose logs hiscores` before restarting after an error. For a bounded foreground test instead of the background service:
+
+```sh
+docker compose run --build --rm hiscores --max-pages 10
+```
+
+Run only one collecting container against this database at a time; a concurrent `--status` is fine. The image runs the parser/checkpoint tests during build. Container build and execution could not be verified in the coding sandbox because access to the local Docker daemon is denied.
+
+You can also run the standard-library Python collector directly. With no page limit either method traverses the discoverable skill and activity categories in the main Old School hiscores instance, following pagination to the end of each category:
 
 ```sh
 python3 scripts/collect_hiscore_names.py

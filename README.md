@@ -15,3 +15,5 @@ Start reading here:
 The target environment is Node 24, Bun >=1.3.14, Pi 0.84.2, and the pinned upstream RS-SDK submodule. Python 3.10+ runs the resumable hiscores name collector; FFmpeg powers optional rotating game recordings (`run --record`). New characters receive randomized appearances. See the [runbook](docs/milestone-1.md) for collection and recording commands. Local saves, credentials, traces, screenshots, videos, and collected names are ignored by Git. The Lumbridge checkout remains reference material.
 
 The provider adapter supports OpenAI-compatible Chat Completions and explicit OpenRouter routing with price ceilings and disabled reasoning. Other APIs need an explicit adapter. Python transport, headless clients, replay, dashboards, and evolution are later milestones.
+
+Run the hiscores name collector in Docker with `docker compose up --build -d hiscores`, then follow progress with `docker compose logs -f hiscores`. Names and crawl checkpoints persist in `.local/hiscores/` on the host. See the [runbook](docs/milestone-1.md#collect-agent-names) for status, stop, and resume commands.

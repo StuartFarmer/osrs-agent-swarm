@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+COPY collect_hiscore_names.py test_collect_hiscore_names.py ./
+RUN python -m unittest -v test_collect_hiscore_names && rm test_collect_hiscore_names.py
+
+STOPSIGNAL SIGINT
+ENTRYPOINT ["python", "-u", "/app/collect_hiscore_names.py", "--database", "/data/names.sqlite"]
