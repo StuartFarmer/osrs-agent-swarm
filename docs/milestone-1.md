@@ -56,8 +56,11 @@ Copy experiments/m1.json to a local ignored experiment, keeping agent paths rela
   "costLimitUsd": 5,
   "zeroCost": false,
   "rates": {
-    "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0
-  }
+    "input": 0,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+  },
 }
 ```
 
@@ -101,7 +104,12 @@ export const gatherer: AgentDefinition = {
   id: "gatherer",
   observe(observation) {
     const view = domainView(observation, [
-      "position", "inventory", "nearby", "interfaces", "bank", "shop",
+      "position",
+      "inventory",
+      "nearby",
+      "interfaces",
+      "bank",
+      "shop",
     ]);
     // Chat is excluded from every model-facing read path for this policy.
     view.derived.freeSlots = 28 - observation.raw.inventory.length;
@@ -111,7 +119,10 @@ export const gatherer: AgentDefinition = {
     const memory = input.memory.read();
     const history = input.history.search("action_outcome", 5);
     return [
-      tableau(input, { recentOutcomes: history, currentPlan: memory.value.plan }),
+      tableau(input, {
+        recentOutcomes: history,
+        currentPlan: memory.value.plan,
+      }),
       ...input.taskMessages,
     ];
   },
@@ -146,4 +157,3 @@ rtk npm run swarm -- report --run RUN_ID
 The live acceptance test evaluates an already operated CLI run; it does not silently buy a new 30-minute run. Missing live flags or run ID causes a skip. Missing agent activity, memory updates, context files, policy proof, social smoke, screenshot, or interventions causes a named failure. Exit codes: 0 success, 1 setup/config error, 2 incomplete acceptance/run.
 
 The report does not claim profitability. Initial states and subsequent observations/tool results preserve evidence for later economic analysis. Full visual replay and headless viewing are deferred until the next milestone.
-

@@ -14,4 +14,3 @@ Start reading here:
 The target environment is Node 24, Bun >=1.3.14, Pi 0.84.2, and the pinned upstream RS-SDK submodule. Local saves, credentials, traces, and screenshots are ignored by Git. The Lumbridge checkout remains reference material.
 
 The initial provider adapter supports OpenAI-compatible Chat Completions with bounded output-token billing. Other APIs need an explicit adapter. Python transport, headless clients, replay, dashboards, and evolution are later milestones.
-
