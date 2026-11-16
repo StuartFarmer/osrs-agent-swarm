@@ -44,7 +44,7 @@ rtk npm run swarm -- world start m1
 rtk npm run swarm -- clients start --experiment experiments/openrouter-m1.json
 ```
 
-The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 43501; run one world at a time. Each world has its own accounts, saves, logs, and browser profile under .local/worlds. Browser connections are separate from SDK controllers. Focusing/capturing a tab does not log in a second client or steal control.
+The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 43501; run one world at a time. Each world has its own accounts, saves, logs, and browser profile under .local/worlds. The launcher sets `WEBSITE_REGISTRATION=false` so the local login server creates new accounts on first authenticated connection. Generated passwords are 20 characters, matching the game client limit. Existing tabs reload if their stored credentials change. Browser connections are separate from SDK controllers. Focusing/capturing a tab does not log in a second client or steal control.
 
 ## Configure inference
 

@@ -42,13 +42,24 @@ export async function accountsFor(
       )
     )
       throw new Error("account roster mismatch");
+    if (
+      accounts.some(
+        (a) =>
+          typeof a.password !== "string" ||
+          a.password.length < 1 ||
+          a.password.length > 20,
+      )
+    )
+      throw new Error(
+        "Stored account passwords must be 1–20 characters; repair incompatible credentials before starting clients.",
+      );
     return accounts;
   }
   const prefix = randomBytes(3).toString("hex");
   const accounts = agents.map((a, i) => ({
     agentId: a.id,
     username: "s" + prefix + String(i + 1).padStart(2, "0"),
-    password: randomBytes(16).toString("hex"),
+    password: randomBytes(10).toString("hex"),
   }));
   await writeFile(path, JSON.stringify(accounts, null, 2), {
     flag: "wx",
@@ -82,9 +93,14 @@ export async function ensureTabs(
       if (matches.length > 1)
         throw new Error("duplicate character tabs: " + a.agentId);
       let page = matches[0];
+      const navigate =
+        !page ||
+        new URL(page.url()).searchParams.get("password") !== a.password;
       if (!page) {
         page = await browser.newPage();
         created.push(page);
+      }
+      if (navigate) {
         const url = new URL("/bot", origin);
         url.searchParams.set("bot", a.username);
         url.searchParams.set("password", a.password);

@@ -23,3 +23,24 @@ test("pinned Pi and upstream SDK import under the required runtime", async () =>
   assert.equal(typeof BotActions, "function");
   assert.equal(typeof executionContext.run, "function");
 });
+
+test("local world settings enable upstream account auto-registration", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { fileURLToPath } = await import("node:url");
+  const { worldEnv } = await import("../src/world.ts");
+  const { stdout } = await promisify(execFile)(
+    "bun",
+    [
+      "-e",
+      "import E from './src/util/Environment.ts'; console.log(JSON.stringify({ sdk: E.WEBSITE_REGISTRATION, game: E.website.registration }));",
+    ],
+    {
+      cwd: fileURLToPath(
+        new URL("../vendor/rs-sdk/server/engine", import.meta.url),
+      ),
+      env: { ...process.env, ...worldEnv },
+    },
+  );
+  assert.deepEqual(JSON.parse(stdout), { sdk: false, game: false });
+});

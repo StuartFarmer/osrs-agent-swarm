@@ -23,6 +23,7 @@ export type OwnedProcess = { pid: number; token: string; script: string };
 export const worldEnv = {
   // Upstream's custom content changes the original cache checksums (server/Dockerfile).
   BUILD_VERIFY: "false",
+  WEBSITE_REGISTRATION: "false",
   EASY_STARTUP: "true",
   NODE_TICKRATE: "400",
   NODE_XPRATE: "1",
@@ -142,6 +143,7 @@ export async function prepareWorld(
   await mkdir(configDir, { recursive: true });
   await writeJson(join(configDir, "world.json"), {
     easyStartup: true,
+    website: { registration: false },
     node: { xpRate: 1, rateLimitDeviceLogin: 50, rateLimitAddressLogin: 50 },
     login: { enabled: true, host: "127.0.0.1" },
     friend: { enabled: true, host: "127.0.0.1" },
