@@ -159,18 +159,22 @@ async function main(): Promise<number> {
         const world = await readWorld(manifest.worldId),
           accounts = await accountsFor(world, manifest.experiment.agents);
         browser = await attachBrowser(world, accounts);
-        print(
-          await recordSession({
-            dir,
-            runId: manifest.runId,
-            worldId: manifest.worldId,
-            agents: accounts,
-            browser,
-            deadline: manifest.deadline,
-            signal: controller.signal,
-            checkQuota: () => trace.check(),
-          }),
-        );
+        const result = await recordSession({
+          dir,
+          runId: manifest.runId,
+          worldId: manifest.worldId,
+          agents: accounts,
+          browser,
+          deadline: manifest.deadline,
+          signal: controller.signal,
+          checkQuota: () => trace.check(),
+          display:
+            process.env.SWARM_CONTAINER === "1"
+              ? process.env.DISPLAY
+              : undefined,
+        });
+        print(result);
+        if (result.status === "failed") return 1;
       } finally {
         process.removeListener("SIGINT", stop);
         process.removeListener("SIGTERM", stop);

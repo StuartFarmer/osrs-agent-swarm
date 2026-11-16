@@ -1,6 +1,6 @@
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, rename } from "node:fs/promises";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -28,6 +28,7 @@ type RecordingOptions = {
   signal: AbortSignal;
   checkQuota(): void;
   slotMs?: number;
+  display?: string;
 };
 
 export async function verifyRecorder(): Promise<void> {
@@ -79,26 +80,57 @@ export async function recordSession(
       JSON.stringify(data) + "\n",
       { mode: 0o600 },
     );
+  if (o.display) {
+    await bounded(
+      o.browser.focus(o.agents[0].agentId),
+      5000,
+      "Timed out focusing recording tab",
+    );
+    await writeFile(join(directory, "label.txt"), "", { mode: 0o600 });
+  }
+  const captureStartedAt = Date.now();
   const encoder = spawn(
     ffmpeg(),
     [
       "-hide_banner",
       "-loglevel",
       "error",
-      "-nostdin",
-      "-use_wallclock_as_timestamps",
-      "1",
-      "-f",
-      "image2pipe",
-      "-vcodec",
-      "mjpeg",
-      "-framerate",
-      "10",
-      "-i",
-      "pipe:0",
+      ...(o.display
+        ? [
+            "-f",
+            "x11grab",
+            "-video_size",
+            "1280x900",
+            "-framerate",
+            "10",
+            "-draw_mouse",
+            "0",
+            "-i",
+            o.display,
+            "-progress",
+            "pipe:1",
+            "-stats_period",
+            "0.5",
+          ]
+        : [
+            "-nostdin",
+            "-use_wallclock_as_timestamps",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-framerate",
+            "10",
+            "-i",
+            "pipe:0",
+          ]),
       "-an",
       "-vf",
-      "setpts=PTS-STARTPTS,fps=10,scale=960:672:force_original_aspect_ratio=decrease,pad=960:672:(ow-iw)/2:(oh-ih)/2,setsar=1,drawtext=text='%{pts\\:hms}':fontcolor=white:fontsize=18:x=w-tw-12:y=10",
+      "setpts=PTS-STARTPTS,fps=10,scale=960:672:force_original_aspect_ratio=decrease,pad=960:672:(ow-iw)/2:(oh-ih)/2,setsar=1,drawtext=text='%{pts\\:hms}':fontcolor=white:fontsize=18:x=w-tw-12:y=10" +
+        (o.display
+          ? ",drawtext=textfile=label.txt:reload=1:expansion=none:fontcolor=white:fontsize=16:box=1:boxcolor=black:x=10:y=h-th-10"
+          : ""),
       "-c:v",
       "libx264",
       "-threads",
@@ -120,7 +152,7 @@ export async function recordSession(
       "-n",
       "session.mp4",
     ],
-    { cwd: directory, stdio: ["pipe", "ignore", "pipe"] },
+    { cwd: directory, stdio: ["pipe", "pipe", "pipe"] },
   );
   let stderr = "",
     processError: Error | undefined,
@@ -144,13 +176,22 @@ export async function recordSession(
     nextQuotaCheck = 0;
   let failure: unknown,
     reachedDeadline = false;
+  let progress = "";
+  encoder.stdout.on("data", (chunk) => {
+    progress += chunk.toString();
+    const lines = progress.split("\n");
+    progress = lines.pop()!;
+    for (const line of lines) {
+      if (line.startsWith("frame=")) frames = Number(line.slice(6));
+    }
+  });
   try {
     await new Promise<void>((resolve, reject) => {
       encoder.once("spawn", resolve);
       encoder.once("error", reject);
     });
     console.error(
-      `[record] Saving ${join(directory, "session.mp4")} (30 seconds per agent)`,
+      `[record] Saving ${join(directory, "session.mp4")} (${o.display ? "desktop" : "canvas"}, ${slotMs / 1000} seconds per agent)`,
     );
     while (!o.signal.aborted && Date.now() < o.deadline) {
       if (exited) throw processError ?? new Error("FFmpeg stopped: " + stderr);
@@ -159,10 +200,11 @@ export async function recordSession(
         o.checkQuota();
         nextQuotaCheck = began + 1000;
       }
+      const rotationStartedAt = o.display ? captureStartedAt : firstFrameAt;
       const index =
-        firstFrameAt === null
+        rotationStartedAt === null
           ? 0
-          : Math.floor((began - firstFrameAt) / slotMs) % o.agents.length;
+          : Math.floor((began - rotationStartedAt) / slotMs) % o.agents.length;
       const agent = o.agents[index];
       if (index !== selected)
         await bounded(
@@ -171,6 +213,33 @@ export async function recordSession(
           "Timed out focusing recording tab",
         );
       const label = `${agent.agentId} | ${agent.displayName ?? agent.username} | ${o.worldId}`;
+      if (o.display) {
+        if (index !== selected) {
+          await writeFile(join(directory, "label.next"), label, {
+            mode: 0o600,
+          });
+          await rename(
+            join(directory, "label.next"),
+            join(directory, "label.txt"),
+          );
+          const switchedAt = Date.now();
+          timeline({
+            type: "switch",
+            runId: o.runId,
+            worldId: o.worldId,
+            agentId: agent.agentId,
+            username: agent.username,
+            capturedAt: switchedAt,
+            videoSeconds: (switchedAt - captureStartedAt) / 1000,
+          });
+          console.error(`[record] ${agent.agentId} (${agent.username})`);
+          selected = index;
+        }
+        await delay(100, undefined, { signal: o.signal }).catch((error) => {
+          if (!o.signal.aborted) throw error;
+        });
+        continue;
+      }
       const jpeg = await bounded(
         o.browser.captureGame(agent.agentId, label),
         5000,
@@ -217,12 +286,11 @@ export async function recordSession(
         if (!o.signal.aborted) throw error;
       });
     }
-    if (!frames) throw new Error("Recording ended before its first frame");
     reachedDeadline = Date.now() >= o.deadline;
   } catch (error) {
     if (!o.signal.aborted) failure = error;
   } finally {
-    encoder.stdin.end();
+    encoder.stdin.end(o.display ? "q\n" : undefined);
     try {
       const code = await bounded(
         closed,
@@ -237,6 +305,8 @@ export async function recordSession(
       failure ??= error;
     }
   }
+  if (!frames && !o.signal.aborted)
+    failure ??= new Error("Recording ended before its first frame");
   await writeFile(join(directory, "encoder.log"), stderr, { mode: 0o600 });
   const result: RecordingResult = {
     directory,
@@ -254,8 +324,14 @@ export async function recordSession(
     finishedAt: Date.now(),
     slotMs,
     fps: 10,
+    source: o.display ? "desktop" : "canvas",
+    ...(o.display
+      ? {
+          captureStartedAt,
+          timing:
+            "Switch times are wall-clock offsets from encoder launch, not exact frame timestamps.",
+        }
+      : {}),
   });
-  if (failure)
-    throw new Error(`Recording failed (${directory}): ${result.error}`);
   return result;
 }

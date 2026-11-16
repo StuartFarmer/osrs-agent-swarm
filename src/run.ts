@@ -355,17 +355,26 @@ export async function startRun(
         deadline: manifest.deadline!,
         signal,
         checkQuota: () => trace.check(),
+        display:
+          process.env.SWARM_CONTAINER === "1" ? process.env.DISPLAY : undefined,
       })
         .then((result) => {
           report.recording = result;
+          if (result.status === "failed")
+            console.error(
+              `[record] Recording failed (${result.directory}): ${result.error}. Agents will continue.`,
+            );
         })
         .catch((error) => {
           report.recording = {
             status: "failed",
             error: error instanceof Error ? error.message : String(error),
           };
-          console.error("[record]", report.recording.error);
-          controller.abort(error);
+          console.error(
+            "[record]",
+            report.recording.error,
+            "Agents will continue.",
+          );
         });
     }
     const tasks = experiment.agents.map(async (a) => {

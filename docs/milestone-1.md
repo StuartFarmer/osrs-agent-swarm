@@ -135,7 +135,7 @@ Or attach a recorder in another terminal after an existing run finishes characte
 rtk npm run swarm -- record --run RUN_ID
 ```
 
-The recorder focuses each existing game tab for 30 seconds, cycling through all ten for the experiment's remaining duration. Ten agents make a five-minute cycle, repeated six times over a full 30-minute run. All agents continue executing while their tabs are off-screen. The video captures the game canvas at a target 10 fps with agent/name/world labels and an elapsed video clock; it excludes the browser URL and credential fields. Each invocation creates:
+The recorder focuses each existing game tab for 30 seconds, cycling through all ten for the experiment's remaining duration. Ten agents make a five-minute cycle, repeated six times over a full 30-minute run. All agents continue executing while their tabs are off-screen. Native recording captures the game canvas at a target 10 fps with agent/name/world labels and an elapsed video clock. Docker uses direct X11 desktop capture so recording does not depend on the game answering JavaScript requests; browser controls/login URLs and manual tab changes are visible. Docker switch timestamps are approximate wall-clock offsets from encoder launch, and labels reflect the scheduled tab. Each invocation creates:
 
 ```text
 runs/RUN_ID/recordings/recording-UUID/
@@ -147,7 +147,7 @@ runs/RUN_ID/recordings/recording-UUID/
 
 The timeline records each agent switch and captured frame with wall-clock timestamps and video offsets, allowing comparison with the agent trace timestamps. Off-screen agents have no video during their gap; their traces still run. This is a visual sample of the experiment, not full-world replay.
 
-Recording ends at the original run deadline. Ctrl-C finishes the current MP4; with `run --record` it also stops the harness, while standalone `record` stops only the recorder. Standalone recording otherwise continues until the saved deadline even if the harness exits early. Resuming with `--record` creates another segment and retains the original run deadline. Only one recorder may own a run. Capture or encoding failures stop an automatically recorded run; they do not silently leave it running without video. Recording bytes count toward the existing artifact quota. Fragmented MP4 preserves completed fragments if the process crashes, though the tail may be incomplete.
+Recording ends at the original run deadline. Ctrl-C finishes the current MP4; with `run --record` it also stops the harness, while standalone `record` stops only the recorder. Standalone recording otherwise continues until the saved deadline even if the harness exits early. Resuming with `--record` creates another segment and retains the original run deadline. Only one recorder may own a run. Capture or encoding failures are logged and reported without stopping the agents; the overall report remains incomplete when requested recording failed. Standalone recording returns a nonzero exit code on failure. Recording bytes count toward the existing artifact quota. Fragmented MP4 preserves completed fragments if the process crashes, though the tail may be incomplete.
 
 Short FFmpeg tests verify playback, rotation, timestamp alignment, and interruption. A full Chrome capture and 30-minute recording still need a live check.
 

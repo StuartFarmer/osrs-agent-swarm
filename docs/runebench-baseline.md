@@ -41,24 +41,18 @@ Cancellation asks the executor to unwind, then kills its process if a CPU loop p
 
 ## Start a separate baseline run
 
-The old manifest describes the tableau experiment. Preserve its evidence instead of resuming with changed definitions. From `typescript-poc`, stop the container, rebuild, and archive only its run pointer:
+For these early tests, use fresh characters and a fresh run each time. From `typescript-poc`, reset the container state volume and rebuild:
 
 ```sh
-docker compose stop swarm
-docker compose build swarm
-docker compose run --rm --no-deps --entrypoint node swarm --input-type=module -e '
-import { existsSync, renameSync } from "node:fs";
-const p = "/app/.local/container-run.json";
-if (existsSync(p)) renameSync(p, p + ".before-runebench-" + Date.now());
-'
-docker compose up -d --force-recreate swarm
+docker compose down --volumes
+docker compose up --build -d swarm
 docker compose logs -f swarm
 ```
 
-Keep `OPENROUTER_API_KEY` exported. This explicitly starts a **new run with its own configured spending cap and 30-minute clock**; spending is not carried forward from the previous ledger. Worlds, accounts and old run artifacts are preserved. New-run memory starts empty. Initial inventory/equipment/skill equality is still checked; this does not reset progressed characters.
+Keep `OPENROUTER_API_KEY` exported. This explicitly starts a **new run with its own $5 spending cap and 30-minute clock**; spending is not carried forward from the previous ledger. The saved world, characters, browser profiles, and active-run pointer are deleted. Host-mounted traces/videos in `runs/` and the name pool in `.local/hiscores/` are preserved. New-run memory starts empty. Initial inventory/equipment/skill equality is still checked against the fresh characters. Removing only the run pointer leaves progressed characters behind and can fail that check.
 
 Read the new ID from `[run]`. The event log includes `script_started` (submitted code) and `script_result` (bounded upstream output, logs, timing and state), alongside model and Pi tool events. Successful code completion alone does not prove profitable gameplay.
 
 ## Verification limits
 
-Offline tests exercise real Pi dispatch, Bun TypeScript execution, context bounds, references, cancellation and worker loss. Live Docker gameplay remains unverified here. The existing five-second recorder canvas timeout is unresolved and can stop a recorded run. The legacy milestone acceptance checker still targets two tableau definitions and primitive action journals; it is not an acceptance test for this new baseline.
+Offline tests exercise real Pi dispatch, Bun TypeScript execution, context bounds, references, cancellation and worker loss. Docker recording now captures the X11 desktop directly, bypassing the canvas request that timed out. Recording failures are reported without cancelling the agents. Tests cover real FFmpeg encoding with a synthetic screen, and Linux builds also test Xvfb capture. Live Docker gameplay remains unverified here. The legacy milestone acceptance checker still targets two tableau definitions and primitive action journals; it is not an acceptance test for this new baseline.

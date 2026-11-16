@@ -2,7 +2,7 @@
 
 The container runs the game server, SDK gateway, Pi agent harness, ten rendered Chromium clients, and FFmpeg recorder. You view and interact with those clients through your own browser. No host Node, Bun, Chromium, or FFmpeg installation is required.
 
-The paid preset now uses the [RuneBench SDK baseline](runebench-baseline.md), with one Bun code executor per character and searchable local SDK/wiki references. If you already ran the tableau preset, follow that guide's separate-run procedure; its saved run cannot be resumed with the new definitions.
+The paid preset now uses the [RuneBench SDK baseline](runebench-baseline.md), with one Bun code executor per character and searchable local SDK/wiki references. For these early tests, start each experiment with a fresh world and characters using the procedure below.
 
 ## Start the 30-minute test
 
@@ -14,13 +14,18 @@ Then run this from the implementation checkout:
 cd /Users/stuart/Developer/CasaDilauro/projects/osrs-bot-swarm/.worktrees/typescript-poc
 read -rs 'OPENROUTER_API_KEY?OpenRouter API key: '
 export OPENROUTER_API_KEY
+docker compose down --volumes
 docker compose up --build -d swarm
 docker compose logs -f swarm
 ```
 
 Skip the hidden key prompt if the environment already supplies it. The first image build installs dependencies, prepares the pinned game world, and runs the tests; allow several minutes. The key is supplied only at container runtime, never during the image build.
 
+Use the same `down --volumes` then `up --build -d swarm` sequence for each fresh test. This deletes this Compose project's saved world, characters, browser profiles, and active-run pointer. Host-mounted `runs/` traces/videos and `.local/hiscores/` names remain. Each test gets empty agent memory, a new 30-minute clock, and its own $5 cap. Removing only the run pointer is insufficient: progressed characters can fail the initial skills/equipment/inventory equality check.
+
 Open **[the live desktop](http://localhost:6080/vnc.html?autoconnect=true&resize=scale)** in your normal browser. You will see Chromium inside the container with ten game tabs. You can click tabs and interact with them yourself. These are the existing bot sessions, so viewing does not create duplicate logins. The recorder focuses another tab every 30 seconds and will therefore also change the tab visible on the desktop.
+
+Docker recording uses FFmpeg's X11 desktop capture at 10 fps, independently of the game's JavaScript. It records the visible desktop, including browser controls and any manual tab changes; local game login URLs may be visible. The agent label and timeline describe the recorder's scheduled tab switches, so avoid manually switching tabs when you want that schedule to match the video. Switch times are approximate wall-clock offsets from encoder launch. A capture/encoder failure is logged and marks the recording failed, but agents continue under the original deadline and spending cap. A run missing its requested video is still reported as incomplete.
 
 After all characters finish preparation, the experiment runs for 30 minutes with four concurrent model requests and the existing $5 ledger cap. The initial characters use names from your collected pool, randomized appearances, and password `admin`. This is a new container world, separate from the native Mac `m1` and `m1smoke` worlds. Native server ports do not conflict because only the desktop port is published by Docker.
 
@@ -69,7 +74,7 @@ The game and ten clients start; the harness and recording do not. Character prep
 | Agent modules, prompts, profiles                                   | Host `agents/`, mounted read-only in the container      |
 | Experiment configuration                                           | Host `experiments/`, mounted read-only in the container |
 
-Ordinary `docker compose down` retains the state volume. `down --volumes` removes the container's world and active-run pointer, so do not use it for a routine restart. The container bootstrap assigns ownership of its data directories and name database to its runtime user; on Linux these files use UID/GID 1000.
+Ordinary `docker compose down` retains the state volume. Use `down --volumes` for the fresh early-test workflow above; omit `--volumes` only when deliberately preserving a run for resume. The container bootstrap assigns ownership of its data directories and name database to its runtime user; on Linux these files use UID/GID 1000.
 
 Prompt/profile edits apply through the existing hot-reload path. Agent module changes need a harness restart; source/runtime changes require an image rebuild. Resume requires the same experiment configuration. The image uses the reviewed npm lock and pinned public RS-SDK Git revision; host `.git`, `.env`, worlds, names, and recordings are excluded from its build context.
 
