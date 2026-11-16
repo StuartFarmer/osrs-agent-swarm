@@ -313,10 +313,10 @@ export function createGame(
     async ready(signal) {
       while (true) {
         signal.throwIfAborted();
-        try {
-          const o = observe();
-          if (o.raw.inGame && o.raw.player && o.ageMs <= freshnessMs) return;
-        } catch {}
+        if (closed) throw new Error("game closed");
+        const { raw, receivedAt } = transport.snapshot();
+        if (raw?.inGame && raw.player && Date.now() - receivedAt <= freshnessMs)
+          return;
         await delay(100, undefined, { signal });
       }
     },
@@ -445,11 +445,15 @@ export function sdkTransport(
   let seq = 0;
   sdk.onStateUpdate(() => seq++);
   return {
-    snapshot: () => ({
-      raw: sdk.getState(),
-      receivedAt: sdk.getStateReceivedAt() ?? 0,
-      seq,
-    }),
+    snapshot: () => {
+      const state = sdk.getState();
+      return {
+        // The SDK adds named skill lookup through a Proxy, which structuredClone rejects.
+        raw: state ? { ...state, skills: Array.from(state.skills) } : null,
+        receivedAt: sdk.getStateReceivedAt() ?? 0,
+        seq,
+      };
+    },
     close: () => sdk.disconnect(),
     dispatch: (a, _snapshot, signal) =>
       executionContext.run({ signal }, async () => {

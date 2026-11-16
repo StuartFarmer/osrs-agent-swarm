@@ -186,3 +186,17 @@ test("serialization lasts until cancelled work actually settles", async () => {
   release();
   await second;
 });
+
+test("readiness reports unexpected snapshot errors instead of silently waiting", async () => {
+  const game = createGame({
+    snapshot: () => {
+      throw new Error("snapshot conversion failed");
+    },
+    dispatch: async () => ({ success: false }),
+    close: async () => {},
+  });
+  await assert.rejects(
+    game.ready(AbortSignal.timeout(50)),
+    /snapshot conversion failed/,
+  );
+});

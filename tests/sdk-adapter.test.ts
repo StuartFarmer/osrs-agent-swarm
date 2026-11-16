@@ -133,3 +133,35 @@ test("adapter applies the experiment freshness limit immediately before dispatch
   assert.equal(result.phase, "validation");
   assert.deepEqual(f.sent, []);
 });
+
+test("real SDK state with named skill access can be observed and becomes ready", async () => {
+  const { BotSDK } = await import("../vendor/rs-sdk/sdk/index.ts");
+  const sdk = new BotSDK({
+    botUsername: "fixture",
+    password: "fixture",
+    autoLaunchBrowser: false,
+  });
+  const f = fixture();
+  f.raw.skills = [{ name: "Woodcutting", level: 1, experience: 0 }];
+  (sdk as any).handleMessage(
+    JSON.stringify({
+      type: "sdk_state",
+      state: f.raw,
+      stateReceivedAt: Date.now(),
+    }),
+  );
+  assert.equal((sdk.getState()!.skills as any).Woodcutting.name, "Woodcutting");
+  const game = createGame(
+    sdkTransport(sdk, {}, { run: (_: unknown, work: () => unknown) => work() }),
+  );
+  const observation = game.observe();
+  assert.deepEqual(observation.raw.skills, f.raw.skills);
+  await game.ready(AbortSignal.timeout(100));
+  (observation.raw.skills[0] as any).level = 99;
+  assert.equal(
+    sdk.getState()!.skills[0].level,
+    1,
+    "observations must remain isolated from live SDK state",
+  );
+  await game.close();
+});
