@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createGame, sdkTransport } from "../src/game.ts";
+import { createGame, sdkTransport, prepareCharacter } from "../src/game.ts";
 
 function fixture(freshnessMs = 3000, stateAgeMs = 0) {
   const raw: any = {
@@ -164,4 +164,54 @@ test("real SDK state with named skill access can be observed and becomes ready",
     "observations must remain isolated from live SDK state",
   );
   await game.close();
+});
+
+test("preparation leaves mainland characters alone and preserves real tutorial failures", async () => {
+  const f = fixture(),
+    signal = new AbortController().signal;
+  const context = { run: <T>(_context: unknown, work: () => T) => work() };
+  let calls = 0;
+  const bot = {
+    skipTutorial: async () => {
+      calls++;
+      return { success: false, message: "No tutorial NPC found" };
+    },
+  };
+  f.raw.player.worldX = 3222;
+  f.raw.player.worldZ = 3218;
+  await prepareCharacter(f.game, bot, context, signal);
+  assert.equal(calls, 0);
+  f.raw.player.worldX = 3095;
+  f.raw.player.worldZ = 3107;
+  await assert.rejects(
+    prepareCharacter(f.game, bot, context, signal),
+    /No tutorial NPC found/,
+  );
+  assert.equal(calls, 1);
+});
+test("tutorial preparation checks arrival on mainland after partial helper success", async () => {
+  const f = fixture(),
+    signal = new AbortController().signal;
+  f.raw.player.worldX = 3095;
+  f.raw.player.worldZ = 3107;
+  let calls = 0;
+  await prepareCharacter(
+    f.game,
+    {
+      skipTutorial: async () => {
+        if (++calls === 2) {
+          f.raw.player.worldX = 3222;
+          f.raw.player.worldZ = 3218;
+        }
+        return { success: true, message: "Dialog closed" };
+      },
+    },
+    { run: <T>(_context: unknown, work: () => T) => work() },
+    signal,
+  );
+  assert.equal(
+    calls,
+    2,
+    "closing one dialog must not count as finishing the tutorial",
+  );
 });

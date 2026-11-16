@@ -82,6 +82,21 @@ export function patchLoopback(source: string, expected: number): string {
     throw new Error("upstream pin changed: loopback patch refused");
   return source.replaceAll("'0.0.0.0'", "'127.0.0.1'");
 }
+export function patchGatewayReadiness(source: string): string {
+  const before = "status: 'running',\n                bots,";
+  const after =
+    "status: 'running',\n                loginServerConnected,\n                bots,";
+  if (source.split(after).length === 2) return source;
+  if (source.split(before).length !== 2)
+    throw new Error("upstream pin changed: gateway readiness patch refused");
+  return source.replace(before, after);
+}
+async function installGatewayReadiness(gameDir: string): Promise<void> {
+  const path = join(gameDir, "server/gateway/gateway.ts");
+  const before = await readFile(path, "utf8"),
+    after = patchGatewayReadiness(before);
+  if (before !== after) await writeFile(path, after);
+}
 async function command(
   cmd: string,
   args: string[],
@@ -139,6 +154,7 @@ export async function prepareWorld(
     }
     await writeFile(path, source);
   }
+  await installGatewayReadiness(gameDir);
   const configDir = join(gameDir, "server/engine/data/config");
   await mkdir(configDir, { recursive: true });
   await writeJson(join(configDir, "world.json"), {
@@ -249,6 +265,23 @@ export async function spawnOwned(
     closeSync(fd);
   }
 }
+export async function worldReady(
+  w: Pick<WorldHandle, "gameUrl" | "gatewayUrl">,
+): Promise<boolean> {
+  const gateway = new URL(w.gatewayUrl);
+  gateway.protocol = "http:";
+  gateway.pathname = "/status";
+  const responses = await Promise.all([
+    fetch(w.gameUrl, { signal: AbortSignal.timeout(1000) }),
+    fetch(gateway, { signal: AbortSignal.timeout(1000) }),
+  ]);
+  if (!responses.every((r) => r.ok)) return false;
+  const status = (await responses[1].json()) as {
+    status?: string;
+    loginServerConnected?: boolean;
+  };
+  return status.status === "running" && status.loginServerConnected === true;
+}
 export async function startWorld(
   id: string,
   root = process.cwd(),
@@ -262,6 +295,7 @@ export async function startWorld(
         "world has owned running processes; use status/stop before start",
       );
   }
+  await installGatewayReadiness(w.gameDir);
   await Promise.all(
     [8888, 8898, 7780, 43594, 43500, 45099, 43501].map(portFree),
   );
@@ -287,11 +321,7 @@ export async function startWorld(
       if (!(await Promise.all(processes.map(ownsProcess))).every(Boolean))
         throw new Error("world process exited; inspect local logs");
       try {
-        const responses = await Promise.all([
-          fetch(w.gameUrl, { signal: AbortSignal.timeout(1000) }),
-          fetch("http://127.0.0.1:7780", { signal: AbortSignal.timeout(1000) }),
-        ]);
-        if (responses.every((r) => r.ok)) return w;
+        if (await worldReady(w)) return w;
       } catch {}
       await delay(500);
     }

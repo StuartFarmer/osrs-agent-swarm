@@ -29,9 +29,11 @@ Creation clones the pinned vendor checkout, installs frozen upstream dependencie
 
 The launcher sets `BUILD_VERIFY=false` for builds and runtime repacking, matching the pinned upstream Dockerfile: RS-SDK's custom content differs from the original cache checksums. The Git revision check and packer validation still run. If an older launcher left an incomplete world after a checksum error, preserve that directory under another name before recreating the original world ID.
 
-The disposable copy receives explicit loopback listener patches. The web transport worker is disabled for this POC so the audited loopback listener handles web traffic. The vendor and reference checkouts are unchanged. Startup commands and migrations remain **unverified against a running engine** until the above smoke test succeeds.
+The disposable copy receives explicit loopback listener patches and a guarded gateway status field exposing its login-server connection. `world start` waits for that connection before returning; it upgrades existing managed world copies on their next start. The web transport worker is disabled for this POC so the audited loopback listener handles web traffic. The vendor and reference checkouts are unchanged. Startup commands and migrations remain **unverified against a running engine** until the above smoke test succeeds.
 
 The smoke test prints `[browser]` and `[smoke]` progress as Chrome starts, each tab opens, and each character connects. A cold Chrome launch may take up to 60 seconds before tabs open. Startup failures release the world lock so the test can exit.
+
+Preparation accepts characters already on the mainland. For characters still on Tutorial Island, it repeats bounded tutorial steps until the observed location leaves the tutorial area and retains SDK failure details.
 
 The smoke test creates three rendered characters, skips the tutorial, and checks public chat, private-message recipient isolation, follow/stop, inventory deltas from a two-sided trade, and drop/pickup. It records observations, action journals, and a screenshot. No LLM is used. An ordinary gathering/banking/shop route still needs live calibration and verification; tool presence alone is not that proof.
 

@@ -426,13 +426,60 @@ export async function connectGame(
     sdkTransport(sdk, bot, executionContext, freshnessMs),
     freshnessMs,
   );
-  game.prepare = async (signal) => {
+  game.prepare = (signal) =>
+    prepareCharacter(game, bot, executionContext, signal);
+  return game;
+}
+
+export async function prepareCharacter(
+  game: GameClient,
+  bot: {
+    skipTutorial(options: {
+      randomizeAppearance: boolean;
+    }): Promise<{ success: boolean; message?: string }>;
+  },
+  executionContext: {
+    run<T>(context: { signal: AbortSignal }, work: () => T): T;
+  },
+  signal: AbortSignal,
+): Promise<void> {
+  const needsTutorial = () => {
+    const o = game.observe(),
+      p = o.raw.player;
+    if (!o.raw.inGame || !p || o.ageMs > 3000)
+      throw new Error("fresh in-game state required for tutorial preparation");
+    if (![p.worldX, p.worldZ].every(Number.isFinite))
+      throw new Error("invalid player coordinates during tutorial preparation");
+    // Pinned content/scripts/tutorial/scripts/util.rs2 includes the underground section.
+    return (
+      (p.worldX >= 3053 &&
+        p.worldX <= 3156 &&
+        p.worldZ >= 3056 &&
+        p.worldZ <= 3136) ||
+      (p.worldX >= 3072 &&
+        p.worldX <= 3118 &&
+        p.worldZ >= 9492 &&
+        p.worldZ <= 9535) ||
+      (o.raw.modalOpen === true && o.raw.modalInterface === 3559)
+    );
+  };
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await game.ready(signal);
+    if (!needsTutorial()) return;
     const result = await executionContext.run({ signal }, () =>
       bot.skipTutorial({ randomizeAppearance: false }),
     );
-    if (!result.success) throw new Error("tutorial preparation failed");
-  };
-  return game;
+    if (!result.success)
+      throw new Error(
+        "tutorial preparation failed: " +
+          (result.message ?? "SDK returned no reason"),
+      );
+    if (!needsTutorial()) return;
+    await delay(1000, undefined, { signal });
+  }
+  throw new Error(
+    "tutorial preparation did not reach the mainland after 30 steps",
+  );
 }
 
 // SDK bindings are injected here so adapter semantics can be tested without a live client.
