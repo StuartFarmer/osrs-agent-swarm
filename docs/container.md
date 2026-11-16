@@ -4,7 +4,9 @@ The container runs the game server, SDK gateway, Pi agent harness, ten rendered 
 
 ## Start the 30-minute test
 
-Start Docker Desktop, then run this from the implementation checkout:
+In Docker Desktop, open **Settings → Resources / VM resources → Advanced** and allocate **at least 32 GiB of memory to the Docker VM**; 40 GiB leaves headroom if the Mac has enough physical RAM. Apply the change and let Docker restart before launching the swarm. Compose allows up to 32 GiB total container memory and 16 GiB of shared memory for Chromium. Shared memory counts toward the total; these are usage limits, not preallocated memory. CPU use is uncapped within the CPUs assigned to Docker Desktop. A Compose limit cannot enlarge the VM's allocation. See [Docker Desktop resource settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced).
+
+Then run this from the implementation checkout:
 
 ```sh
 cd /Users/stuart/Developer/CasaDilauro/projects/osrs-bot-swarm/.worktrees/typescript-poc
@@ -41,6 +43,8 @@ docker compose stop swarm
 Stopping signals the harness to drain and finish its MP4 before closing Chromium and the world. Compose allows up to four minutes for cleanup. An abrupt Docker/host shutdown can still leave the final video fragment incomplete; previously written video fragments, SQLite state, and traces remain on disk.
 
 Restart with `docker compose up -d swarm`. The durable active-run pointer selects the same experiment run, retaining its original deadline, memory, and spending ledger; downtime counts against the 30 minutes. If that deadline has passed, startup opens the desktop without starting more inference. A corrupt or missing referenced run fails rather than silently resetting the budget. This wrapper operates one durable experiment; it does not reset characters or start additional experiments on restart. An exclusive filesystem lock rejects a second container using the same state volume.
+
+To apply a changed memory configuration, first stop the swarm, adjust Docker Desktop's VM resources if necessary, and run `docker compose up -d --force-recreate swarm`. No image rebuild is needed. Check actual container usage with `docker stats --no-stream typescript-poc-swarm-1`, and shared-memory usage with `docker compose exec swarm df -h /dev/shm`. A renderer crash can also have causes other than memory; increasing limits is not proof that its cause has been fixed.
 
 ## View without inference
 
