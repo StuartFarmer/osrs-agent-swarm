@@ -10,7 +10,7 @@ test("pinned Pi and upstream SDK import under the required runtime", async () =>
   );
   assert.doesNotThrow(() => verifyRuntime());
   const { Agent } = await import("@earendil-works/pi-agent-core");
-  const sdkPath = "../vendor/rs-sdk/sdk/index.ts";
+  const sdkPath = "../src/sdk.ts";
   const actionsPath = "../vendor/rs-sdk/sdk/actions.ts";
   const executionPath = "../vendor/rs-sdk/sdk/execution-context.ts";
   const [{ BotSDK }, { BotActions }, { executionContext }] = await Promise.all([

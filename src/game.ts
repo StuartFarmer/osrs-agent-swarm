@@ -389,8 +389,7 @@ export async function connectGame(
   freshnessMs = 3000,
 ): Promise<GameClient> {
   localUrl(world.gatewayUrl, ["ws:"]);
-  const sdkPath = new URL("../vendor/rs-sdk/sdk/index.ts", import.meta.url)
-    .href;
+  const sdkPath = new URL("./sdk.ts", import.meta.url).href;
   const actionsPath = new URL(
     "../vendor/rs-sdk/sdk/actions.ts",
     import.meta.url,

@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createGame, sdkTransport, prepareCharacter } from "../src/game.ts";
+import { BotSDK } from "../src/sdk.ts";
+const { BotActions } = await import(
+  new URL("../vendor/rs-sdk/sdk/actions.ts", import.meta.url).href
+);
 
 function fixture(freshnessMs = 3000, stateAgeMs = 0) {
   const raw: any = {
@@ -322,4 +326,64 @@ test("initial character preparation requests randomized appearance", async () =>
     new AbortController().signal,
   );
   assert.equal(randomized, true);
+});
+
+test("real tutorial helper talks to RuneScape Guide when the shorter Quest Guide is also visible", async (t) => {
+  const f = fixture();
+  f.raw.nearbyNpcs = [
+    {
+      index: 10,
+      name: "RuneScape Guide",
+      reachable: true,
+      optionsWithIndex: [{ text: "Talk-to", opIndex: 1 }],
+    },
+    {
+      index: 20,
+      name: "Quest Guide",
+      reachable: true,
+      optionsWithIndex: [{ text: "Talk-to", opIndex: 1 }],
+    },
+  ];
+  const sdk = new BotSDK({ botUsername: "fixture", autoLaunchBrowser: false });
+  (sdk as any).handleMessage(
+    JSON.stringify({
+      type: "sdk_state",
+      state: f.raw,
+      stateReceivedAt: Date.now(),
+    }),
+  );
+  t.mock.method(sdk, "waitForCondition", async () => {
+    throw new Error("No modal yet");
+  });
+  const interactions: number[] = [];
+  t.mock.method(sdk, "sendInteractNpc", async (index: number) => {
+    interactions.push(index);
+    return { success: false, message: "Stopped at network boundary" };
+  });
+  await new BotActions(sdk).skipTutorial();
+  assert.deepEqual(interactions, [10]);
+  assert.equal(
+    sdk.findNearbyNpc(/guide/i)?.index,
+    20,
+    "ordinary searches retain upstream semantics",
+  );
+  assert.equal(sdk.findNearbyNpc(/^Quest Guide$/i)?.index, 20);
+});
+
+test("tutorial helper waits for RuneScape Guide instead of falling back to Quest Guide", async () => {
+  const f = fixture();
+  f.raw.nearbyNpcs = [
+    { index: 20, name: "Quest Guide", reachable: true, optionsWithIndex: [] },
+  ];
+  const sdk = new BotSDK({ botUsername: "fixture", autoLaunchBrowser: false });
+  (sdk as any).handleMessage(
+    JSON.stringify({
+      type: "sdk_state",
+      state: f.raw,
+      stateReceivedAt: Date.now(),
+    }),
+  );
+  const result = await new BotActions(sdk).skipTutorial();
+  assert.equal(result.success, false);
+  assert.equal(result.message, "No tutorial NPC found");
 });
