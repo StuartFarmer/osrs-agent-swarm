@@ -1,0 +1,4 @@
+[submodule "vendor/rs-sdk"]
+	path = vendor/rs-sdk
+	url = https://github.com/MaxBittker/rs-sdk.git
+

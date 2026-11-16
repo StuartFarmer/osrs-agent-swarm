@@ -1,0 +1,87 @@
+{
+  "world": {
+    "id": "m1",
+    "gameUrl": "http://127.0.0.1:8888",
+    "gatewayUrl": "ws://127.0.0.1:7780",
+    "tickMs": 400,
+    "xpRate": 1
+  },
+  "durationSeconds": 1800,
+  "preparationSeconds": 300,
+  "concurrency": 4,
+  "healthyDelayMs": 1000,
+  "failureDelayMs": 5000,
+  "limits": {
+    "requests": 8,
+    "tools": 16,
+    "taskSeconds": 120,
+    "outputTokens": 2048,
+    "freshnessMs": 3000,
+    "contextBytes": 65536,
+    "memoryBytes": 16384,
+    "artifactBytes": 1073741824
+  },
+  "model": null,
+  "agents": [
+    {
+      "id": "agent1",
+      "definition": "merchant",
+      "profilePath": "agents/profiles/agent1.json",
+      "instructionsPath": "agents/profiles/agent1.md"
+    },
+    {
+      "id": "agent2",
+      "definition": "gatherer",
+      "profilePath": "agents/profiles/agent2.json",
+      "instructionsPath": "agents/profiles/agent2.md"
+    },
+    {
+      "id": "agent3",
+      "definition": "merchant",
+      "profilePath": "agents/profiles/agent3.json",
+      "instructionsPath": "agents/profiles/agent3.md"
+    },
+    {
+      "id": "agent4",
+      "definition": "gatherer",
+      "profilePath": "agents/profiles/agent4.json",
+      "instructionsPath": "agents/profiles/agent4.md"
+    },
+    {
+      "id": "agent5",
+      "definition": "merchant",
+      "profilePath": "agents/profiles/agent5.json",
+      "instructionsPath": "agents/profiles/agent5.md"
+    },
+    {
+      "id": "agent6",
+      "definition": "gatherer",
+      "profilePath": "agents/profiles/agent6.json",
+      "instructionsPath": "agents/profiles/agent6.md"
+    },
+    {
+      "id": "agent7",
+      "definition": "merchant",
+      "profilePath": "agents/profiles/agent7.json",
+      "instructionsPath": "agents/profiles/agent7.md"
+    },
+    {
+      "id": "agent8",
+      "definition": "gatherer",
+      "profilePath": "agents/profiles/agent8.json",
+      "instructionsPath": "agents/profiles/agent8.md"
+    },
+    {
+      "id": "agent9",
+      "definition": "merchant",
+      "profilePath": "agents/profiles/agent9.json",
+      "instructionsPath": "agents/profiles/agent9.md"
+    },
+    {
+      "id": "agent10",
+      "definition": "gatherer",
+      "profilePath": "agents/profiles/agent10.json",
+      "instructionsPath": "agents/profiles/agent10.md"
+    }
+  ]
+}
