@@ -31,6 +31,8 @@ The launcher sets `BUILD_VERIFY=false` for builds and runtime repacking, matchin
 
 The disposable copy receives explicit loopback listener patches. The web transport worker is disabled for this POC so the audited loopback listener handles web traffic. The vendor and reference checkouts are unchanged. Startup commands and migrations remain **unverified against a running engine** until the above smoke test succeeds.
 
+The smoke test prints `[browser]` and `[smoke]` progress as Chrome starts, each tab opens, and each character connects. A cold Chrome launch may take up to 60 seconds before tabs open. Startup failures release the world lock so the test can exit.
+
 The smoke test creates three rendered characters, skips the tutorial, and checks public chat, private-message recipient isolation, follow/stop, inventory deltas from a two-sided trade, and drop/pickup. It records observations, action journals, and a screenshot. No LLM is used. An ordinary gathering/banking/shop route still needs live calibration and verification; tool presence alone is not that proof.
 
 Stop the smoke world and close its dedicated browser before starting another world on the same ports:

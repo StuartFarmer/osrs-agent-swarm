@@ -77,6 +77,7 @@ export async function ensureTabs(
     created: Page[] = [];
   try {
     for (const a of accounts) {
+      console.error(`[browser] Opening game tab for ${a.agentId}...`);
       const matches = pages.filter((p) => botName(p, origin) === a.username);
       if (matches.length > 1)
         throw new Error("duplicate character tabs: " + a.agentId);
@@ -107,6 +108,29 @@ async function connect(endpoint: string): Promise<Browser> {
     browserWSEndpoint: endpoint,
     defaultViewport: null,
   });
+}
+export async function waitForBrowserEndpoint(
+  profile: string,
+  timeoutMs = 60000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const [port, path] = (
+        await readFile(join(profile, "DevToolsActivePort"), "utf8")
+      )
+        .trim()
+        .split("\n");
+      if (/^\d+$/.test(port) && path?.startsWith("/devtools/browser/"))
+        return "ws://127.0.0.1:" + port + path;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await delay(Math.min(100, Math.max(0, deadline - Date.now())));
+  }
+  throw new Error(
+    `Chrome control connection was not ready within ${timeoutMs / 1000}s; inspect browser.log`,
+  );
 }
 export async function attachBrowser(
   world: WorldHandle,
@@ -176,26 +200,14 @@ export async function startBrowser(
         world.dir,
         join(world.dir, "browser.log"),
       );
-      let endpoint = "";
-      for (let i = 0; i < 100; i++) {
-        try {
-          const [port, path] = (
-            await readFile(join(sessionProfile, "DevToolsActivePort"), "utf8")
-          )
-            .trim()
-            .split("\n");
-          if (!/^\d+$/.test(port) || !path.startsWith("/devtools/browser/"))
-            throw new Error("invalid browser endpoint");
-          endpoint = "ws://127.0.0.1:" + port + path;
-          break;
-        } catch {
-          await delay(100);
-        }
-      }
-      if (!endpoint) throw new Error("browser startup timeout");
+      console.error(
+        "[browser] Waiting up to 60s for Chrome's control connection...",
+      );
+      const endpoint = await waitForBrowserEndpoint(sessionProfile);
       metadata = { process: owned, endpoint };
       await writeJson(metadataPath, metadata);
     }
+    console.error("[browser] Connecting to Chrome...");
     const browser = await connect(metadata.endpoint);
     try {
       await ensureTabs(browser, world.gameUrl, accounts);
@@ -204,7 +216,20 @@ export async function startBrowser(
     }
     return attachBrowser(world, accounts);
   } catch (e) {
-    if (owned && (await ownsProcess(owned))) await stopOwned(owned);
+    console.error(
+      "[browser] Startup failed:",
+      e instanceof Error ? e.message : String(e),
+    );
+    if (owned && (await ownsProcess(owned))) {
+      try {
+        await stopOwned(owned);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [e, cleanupError],
+          "Browser startup failed and Chrome did not shut down; close its window manually.",
+        );
+      }
+    }
     throw e;
   }
 }
