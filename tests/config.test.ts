@@ -18,6 +18,18 @@ test("demo has ten independently configured agents and no implicit paid model", 
   assert.equal(e.model, null);
   assert.equal(e.concurrency, 4);
   assert.equal(e.durationSeconds, 1800);
+  for (const retired of ["requests", "tools", "taskSeconds", "contextBytes", "memoryBytes"])
+    assert.equal(Object.hasOwn(e.limits, retired), false);
+});
+
+test("old manifest limit fields remain readable without their former ceilings", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "swarm-legacy-config-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const config = JSON.parse(await readFile("experiments/m1.json", "utf8"));
+  Object.assign(config.limits, { requests: 100, tools: 100, taskSeconds: 3600, contextBytes: 1000000, memoryBytes: 1000000 });
+  const file = join(dir, "experiment.json");
+  await writeFile(file, JSON.stringify(config));
+  assert.deepEqual((await loadExperiment(file)).limits, config.limits);
 });
 
 test("rejects malformed experiments before opening clients or calling models", async (t) => {

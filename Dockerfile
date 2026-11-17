@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 FROM oven/bun:1.3.14-debian AS bun
-FROM node:24.22.3-bookworm-slim
+FROM node:24.22.3-bookworm-slim AS swarm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git procps ffmpeg python3 chromium xvfb x11-utils \
@@ -32,3 +32,27 @@ EXPOSE 6080
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/bin/sh", "/app/docker/entrypoint.sh"]
 CMD []
+
+# Keep the viewer's React/toolchain dependencies out of the running game image.
+FROM node:20-bookworm-slim AS viewer
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+COPY scripts/viewer-revision.txt scripts/prepare-viewer.mjs /build-tools/
+RUN git init /viewer \
+    && git -C /viewer remote add origin https://github.com/MaxBittker/rs-world.git \
+    && git -C /viewer fetch --depth 1 origin "$(cat /build-tools/viewer-revision.txt)" \
+    && git -C /viewer checkout --detach FETCH_HEAD
+WORKDIR /viewer
+RUN yarn install --frozen-lockfile --ignore-scripts \
+    && node /build-tools/prepare-viewer.mjs /viewer
+COPY --from=swarm /opt/swarm-world/game/server/engine/data/pack /engine-pack
+RUN bun scripts/sync-rs-sdk-cache.ts --pack /engine-pack --revision 289 \
+    && CI=false PUBLIC_URL=/viewer GENERATE_SOURCEMAP=false yarn build \
+    && cp -r caches build/caches \
+    && cp LICENSE build/UPSTREAM-LICENSE.txt \
+    && cp /build-tools/viewer-revision.txt build/UPSTREAM-REVISION.txt
+
+FROM swarm
+COPY --from=viewer /viewer/build /opt/swarm-viewer
+ENV SWARM_VIEWER_DIR=/opt/swarm-viewer

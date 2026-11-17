@@ -1,25 +1,23 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify, parseArgs } from "node:util";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadExperiment } from "../src/config.ts";
-import { accountsFor, startBrowser } from "../src/browser.ts";
+import { accountsFor, startBrowser, stopBrowser } from "../src/browser.ts";
 import { startRun, readManifest } from "../src/run.ts";
-import {
-  startWorld,
-  stopWorld,
-  readWorld,
-  ownsProcess,
-  stopOwned,
-  writeJson,
-} from "../src/world.ts";
+import { startWorld, stopWorld, readWorld, writeJson } from "../src/world.ts";
 import { verifyRecorder } from "../src/recording.ts";
-import { seedContainerWorld, containerRunId } from "./state.ts";
+import type { Server } from "node:http";
+import { startLite, stopLite } from "../src/lite.ts";
+import { startSpectator } from "../src/spectator.ts";
+import {
+  seedContainerWorld,
+  containerRunId,
+  containerRunPath,
+} from "./state.ts";
 
 const exec = promisify(execFile);
 const { values } = parseArgs({
-  options: { "view-only": { type: "boolean" } },
+  options: { "view-only": { type: "boolean" }, experiment: { type: "string" } },
 });
 const controller = new AbortController(),
   signal = controller.signal;
@@ -31,7 +29,13 @@ let stopping = false,
   worldStarted = false,
   browserStarted = false,
   failure: unknown;
-const experiment = await loadExperiment("experiments/openrouter-m1.json");
+const experiment = await loadExperiment(
+  values.experiment ??
+    process.env.SWARM_EXPERIMENT ??
+    "experiments/headless-m1.json",
+);
+const headless = experiment.clientMode === "headless";
+let spectator: Server | undefined;
 
 function launch(command: string, args: string[]) {
   const child = spawn(command, args, {
@@ -81,12 +85,16 @@ try {
     throw new Error(
       "Export OPENROUTER_API_KEY before docker compose up, or launch with --view-only",
     );
-  await verifyRecorder();
-  const pointer = join(process.cwd(), ".local/container-run.json");
+  if (!headless) await verifyRecorder();
+  const pointer = containerRunPath(process.cwd(), process.env.SWARM_RUN_NAME);
   const resumeRunId = await containerRunId(pointer);
   let finished = false;
   if (resumeRunId) {
     const previous = await readManifest(resumeRunId);
+    if (JSON.stringify(previous.experiment) !== JSON.stringify(experiment))
+      throw new Error(
+        "Saved experiment differs; choose a new SWARM_RUN_NAME to start a new run in this saved world. Previous runs and budgets are preserved.",
+      );
     if (previous.worldId !== experiment.world.id)
       throw new Error("Saved container run belongs to another world");
     finished = previous.deadline !== null && Date.now() >= previous.deadline;
@@ -94,45 +102,60 @@ try {
   console.error("[container] Preparing persistent world state...");
   await seedContainerWorld("/opt/swarm-world", experiment.world.id);
   signal.throwIfAborted();
-  launch("Xvfb", [
-    ":99",
-    "-screen",
-    "0",
-    "1280x900x24",
-    "-nolisten",
-    "tcp",
-    "-ac",
-  ]);
-  await waitForDisplay();
-  launch("openbox", []);
-  launch("x11vnc", [
-    "-display",
-    ":99",
-    "-localhost",
-    "-rfbport",
-    "5900",
-    "-forever",
-    "-shared",
-    "-nopw",
-    "-quiet",
-  ]);
-  launch("websockify", [
-    "--web",
-    "/usr/share/novnc",
-    "0.0.0.0:6080",
-    "127.0.0.1:5900",
-  ]);
-  console.error(
-    "[container] View agents at http://localhost:6080/vnc.html?autoconnect=true&resize=scale",
-  );
+  if (!headless) {
+    launch("Xvfb", [
+      ":99",
+      "-screen",
+      "0",
+      "1280x900x24",
+      "-nolisten",
+      "tcp",
+      "-ac",
+    ]);
+    await waitForDisplay();
+    launch("openbox", []);
+    launch("x11vnc", [
+      "-display",
+      ":99",
+      "-localhost",
+      "-rfbport",
+      "5900",
+      "-forever",
+      "-shared",
+      "-nopw",
+      "-quiet",
+    ]);
+    launch("websockify", [
+      "--web",
+      "/usr/share/novnc",
+      "0.0.0.0:6080",
+      "127.0.0.1:5900",
+    ]);
+    console.error(
+      "[container] View agents at http://localhost:6080/vnc.html?autoconnect=true&resize=scale",
+    );
+  }
   console.error("[container] Starting the game server and gateway...");
-  const world = await startWorld(experiment.world.id, process.cwd(), signal);
-  worldStarted = true;
-  console.error("[container] World ready; opening ten rendered clients...");
-  const browser = await startBrowser(
-    world,
-    await accountsFor(world, experiment.agents),
+  const world = await startWorld(
+    experiment.world.id,
+    process.cwd(),
+    signal,
+    experiment.world.tickMs,
   );
+  worldStarted = true;
+  if (headless) {
+    spectator = await startSpectator(world, 6080, "0.0.0.0");
+    console.error(
+      "[container] 3D spectator and agent inspector: http://localhost:6080/watch/; 2D map: http://localhost:6080/mapview/",
+    );
+  }
+  console.error(
+    `[container] World ready; opening ${experiment.agents.length} ${headless ? "headless" : "rendered"} clients...`,
+  );
+  const accounts = await accountsFor(world, experiment.agents);
+  const browser = headless
+    ? await startLite(world, accounts, signal)
+    : await startBrowser(world, accounts);
   browserStarted = true;
   await browser.close();
   signal.throwIfAborted();
@@ -146,17 +169,17 @@ try {
     console.error(
       resumeRunId
         ? `[container] Resuming ${resumeRunId} with its original deadline and budget.`
-        : "[container] Starting the recorded 30-minute experiment.",
+        : `[container] Starting ${headless ? "headless" : "recorded"} experiment (${experiment.durationSeconds}s wall time, ${experiment.world.tickMs}ms ticks).`,
     );
     const report = await startRun(experiment, {
       signal,
-      record: true,
+      record: !headless,
       resumeRunId,
       onRunCreated: (runId) => writeJson(pointer, { runId }),
     });
     console.log(JSON.stringify(report, null, 2));
     console.error(
-      "[container] Harness finished. Desktop remains available; docker compose stop swarm shuts down the world.",
+      "[container] Harness finished. Viewer remains available; docker compose stop swarm shuts down the world.",
     );
   }
   await waitForStop();
@@ -166,14 +189,13 @@ try {
   stopping = true;
   controller.abort();
   const cleanupErrors: unknown[] = [];
+  if (spectator)
+    await new Promise<void>((resolve) => spectator!.close(() => resolve()));
   if (browserStarted) {
     try {
       const world = await readWorld(experiment.world.id);
-      const metadata = JSON.parse(
-        await readFile(join(world.dir, "browser.json"), "utf8"),
-      );
-      if (await ownsProcess(metadata.process))
-        await stopOwned(metadata.process);
+      if (headless) await stopLite(world);
+      else await stopBrowser(world);
     } catch (error) {
       cleanupErrors.push(error);
     }

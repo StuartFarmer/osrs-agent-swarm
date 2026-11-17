@@ -26,7 +26,7 @@ function scope(key: AgentKey): string {
   Object.values(key).forEach(identifier);
   return JSON.stringify([key.runId, key.worldId, key.agentId]);
 }
-export function validateMemory(value: unknown, maxBytes = 16384): Memory {
+export function validateMemory(value: unknown): Memory {
   const m = object(
     value,
     ["plan", "beliefs", "relationships", "nextAction"],
@@ -45,8 +45,6 @@ export function validateMemory(value: unknown, maxBytes = 16384): Memory {
     !Object.values(m.relationships).every((x) => typeof x === "string")
   )
     throw new Error("invalid memory");
-  if (Buffer.byteLength(JSON.stringify(m)) > maxBytes)
-    throw new Error("memory size limit");
   return m as Memory;
 }
 export class Store {

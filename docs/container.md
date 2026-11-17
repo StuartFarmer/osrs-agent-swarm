@@ -1,85 +1,86 @@
 # Run the swarm in Docker
 
-The container runs the game server, SDK gateway, Pi agent harness, ten rendered Chromium clients, and FFmpeg recorder. You view and interact with those clients through your own browser. No host Node, Bun, Chromium, or FFmpeg installation is required.
-
-The paid preset now uses the [RuneBench SDK baseline](runebench-baseline.md), with one Bun code executor per character and searchable local SDK/wiki references. For these early tests, start each experiment with a fresh world and characters using the procedure below.
+The default experiment uses true headless clients. Docker starts the game server, SDK gateway, Bun lite clients, and Pi harness, with a 3D spectator, agent inspector, and 2D map on port 6080. It does not launch Chromium, a desktop, or recording in this mode. The same image retains those dependencies for the optional rendered preset.
 
 ## Start the 30-minute test
 
-In Docker Desktop, open **Settings → Resources / VM resources → Advanced** and allocate **at least 32 GiB of memory to the Docker VM**; 40 GiB leaves headroom if the Mac has enough physical RAM. Apply the change and let Docker restart before launching the swarm. Compose allows up to 32 GiB total container memory and 16 GiB of shared memory for Chromium. Shared memory counts toward the total; these are usage limits, not preallocated memory. CPU use is uncapped within the CPUs assigned to Docker Desktop. A Compose limit cannot enlarge the VM's allocation. See [Docker Desktop resource settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced).
+Run from the repository root on `feat/headless-swarm`. On Ubuntu, Docker with Compose is sufficient; native Node/Bun installations are not needed. Docker Desktop users should allocate at least 32 GiB to its VM. Compose currently caps container memory at 32 GiB; that is not a 1,000-client sizing recommendation.
 
-Then run this from the implementation checkout:
-
-```sh
-cd /Users/stuart/Developer/CasaDilauro/projects/osrs-bot-swarm/.worktrees/typescript-poc
-read -rs 'OPENROUTER_API_KEY?OpenRouter API key: '
-export OPENROUTER_API_KEY
-docker compose down --volumes
-docker compose up --build -d swarm
-docker compose logs -f swarm
-```
-
-Skip the hidden key prompt if the environment already supplies it. The first image build installs dependencies, prepares the pinned game world, and runs the tests; allow several minutes. The key is supplied only at container runtime, never during the image build.
-
-Use the same `down --volumes` then `up --build -d swarm` sequence for each fresh test. This deletes this Compose project's saved world, characters, browser profiles, and active-run pointer. Host-mounted `runs/` traces/videos and `.local/hiscores/` names remain. Each test gets empty agent memory, a new 30-minute clock, and its own $5 cap. Removing only the run pointer is insufficient: progressed characters can fail the initial skills/equipment/inventory equality check.
-
-Open **[the live desktop](http://localhost:6080/vnc.html?autoconnect=true&resize=scale)** in your normal browser. You will see Chromium inside the container with ten game tabs. You can click tabs and interact with them yourself. These are the existing bot sessions, so viewing does not create duplicate logins. The recorder focuses another tab every 30 seconds and will therefore also change the tab visible on the desktop.
-
-Docker recording uses FFmpeg's X11 desktop capture at 10 fps, independently of the game's JavaScript. It records the visible desktop, including browser controls and any manual tab changes; local game login URLs may be visible. The agent label and timeline describe the recorder's scheduled tab switches, so avoid manually switching tabs when you want that schedule to match the video. Switch times are approximate wall-clock offsets from encoder launch. A capture/encoder failure is logged and marks the recording failed, but agents continue under the original deadline and spending cap. A run missing its requested video is still reported as incomplete.
-
-After all characters finish preparation, the experiment runs for 30 minutes with four concurrent model requests and the existing $5 ledger cap. The initial characters use names from your collected pool, randomized appearances, and password `admin`. This is a new container world, separate from the native Mac `m1` and `m1smoke` worlds. Native server ports do not conflict because only the desktop port is published by Docker.
-
-Look for `[run] RUN_ID` in the logs. Videos and traces are written directly to the project:
-
-```text
-runs/RUN_ID/recordings/recording-UUID/session.mp4
-runs/RUN_ID/recordings/recording-UUID/timeline.jsonl
-runs/RUN_ID/agents/m1/AGENT_ID/events.jsonl
-```
-
-The desktop and game remain available after the harness finishes. Ctrl-C in `docker compose logs -f` only leaves the log viewer.
-
-## Status and stopping
+Use a separate Compose project for the headless experiment to preserve any existing rendered state. Stop any other swarm publishing port 6080 first.
 
 ```sh
-docker compose exec --user node swarm npm run swarm -- status --run RUN_ID
-docker compose exec --user node swarm npm run swarm -- memory get --run RUN_ID --agent agent1
-docker compose stop swarm
+export OPENROUTER_API_KEY='your-openrouter-api-key'
+docker compose -p swarm-headless up --build -d swarm
+docker compose -p swarm-headless logs -f swarm
 ```
 
-Stopping signals the harness to drain and finish its MP4 before closing Chromium and the world. Compose allows up to four minutes for cleanup. An abrupt Docker/host shutdown can still leave the final video fragment incomplete; previously written video fragments, SQLite state, and traces remain on disk.
+The first build installs dependencies, prepares the pinned world, and runs offline checks. The API key is supplied at runtime, never during the image build. The default `experiments/headless-m1.json` starts paid inference after preparation: ten agents, normal 400 ms ticks, 30 minutes of wall time, four concurrent requests, and a $5 ledger cap. See the [inference accounting limits](milestone-1.md#configure-inference).
 
-Restart with `docker compose up -d swarm`. The durable active-run pointer selects the same experiment run, retaining its original deadline, memory, and spending ledger; downtime counts against the 30 minutes. If that deadline has passed, startup opens the desktop without starting more inference. A corrupt or missing referenced run fails rather than silently resetting the budget. This wrapper operates one durable experiment; it does not reset characters or start additional experiments on restart. An exclusive filesystem lock rejects a second container using the same state volume.
+Open [the 3D spectator](http://localhost:6080/watch/) to follow players and inspect their SDK state; the [2D map](http://localhost:6080/mapview/) remains available. For a remote server, use `ssh -L 6080:127.0.0.1:6080 user@concepcion` from your laptop. The image bundles pinned RS World assets using the engine cache. The inspector uses authenticated read-only gateway queries and never logs in as the character. It shows SDK observations, not an exact rendered client screen. See [headless calibration and limitations](../HEADLESS.md).
 
-To apply a changed memory configuration, first stop the swarm, adjust Docker Desktop's VM resources if necessary, and run `docker compose up -d --force-recreate swarm`. No image rebuild is needed. Check actual container usage with `docker stats --no-stream typescript-poc-swarm-1`, and shared-memory usage with `docker compose exec swarm df -h /dev/shm`. A renderer crash can also have causes other than memory; increasing limits is not proof that its cause has been fixed.
+A changed experiment requires a new `SWARM_RUN_NAME`, which retains the same saved world and creates a separate run with its own deadline and budget. Existing characters are reused and newly requested agent IDs are added. See [growing to 25 agents](../HEADLESS.md#grow-the-existing-world-to-25-agents). Use a new Compose project only when you want an independent world. Only one project can publish host port 6080 at a time. If you deliberately want to delete this project's saved world and characters:
+
+```sh
+docker compose -p swarm-headless down --volumes
+docker compose -p swarm-headless up -d swarm
+```
+
+This deletes saved characters, browser profiles if present, and the active-run pointer. Host-mounted `runs/` and `.local/hiscores/` remain. Removing only the run pointer is insufficient to reset progressed characters. Each new experiment has a new deadline and spending cap.
+
+## Status, stopping, and resume
+
+Look for `[run] RUN_ID` in the logs. Evidence is written to `runs/RUN_ID/`, including `report.json`, `manifest.json`, `state.sqlite`, and `agents/m1/AGENT_ID/events.jsonl`.
+
+```sh
+docker compose -p swarm-headless exec --user node swarm npm run swarm -- world stats
+docker compose -p swarm-headless exec --user node swarm npm run swarm -- status --run RUN_ID
+docker compose -p swarm-headless exec --user node swarm npm run swarm -- memory get --run RUN_ID --agent agent1
+docker compose -p swarm-headless stop swarm
+docker compose -p swarm-headless up -d swarm
+```
+
+Stopping drains the harness, stops clients, then saves/stops the world. Compose allows four minutes for cleanup. Restart selects the durable active-run pointer and retains its original deadline, memory, and spending ledger. Downtime counts against the duration. If the deadline has passed, the viewer opens without new inference. Changed configuration under the same run name, or a corrupt/missing referenced run, fails instead of resetting the budget. Keep `SWARM_RUN_NAME` and `SWARM_EXPERIMENT` set when restarting a named run. An exclusive filesystem lock rejects simultaneous containers using the same state volume.
+
+The viewer and world remain available after the harness ends. Ctrl-C in `logs -f` only leaves the log viewer. Ordinary `down` retains the volume. An abrupt host shutdown can still interrupt pending actions and writes; inspect evidence before resuming.
 
 ## View without inference
 
-To check desktop and client startup without an API key or model spending:
-
 ```sh
-docker compose down
-docker compose run --rm --service-ports swarm --view-only
+docker compose -p swarm-headless down
+docker compose -p swarm-headless run --rm --service-ports swarm --view-only
 ```
 
-The game and ten clients start; the harness and recording do not. Character preparation is performed when the normal experiment starts. Ctrl-C shuts down this foreground container.
+No API key is required. The world and clients start, but preparation, inference, and recording do not. Ctrl-C shuts down the foreground container. For a persistent preview with ordinary Compose logs, stop the foreground container and run `docker compose -p swarm-headless -f compose.yaml -f compose.preview.yaml up -d swarm`. See [updating concepcion](../HEADLESS.md#update-the-existing-preview-on-concepcion) for preserving the existing deployment.
 
-## Persistence and editing
+## Optional rendered clients
 
-| Data                                                               | Location                                                |
-| ------------------------------------------------------------------ | ------------------------------------------------------- |
-| Game database, player saves, browser profiles, current run pointer | Compose volume `swarm-state`                            |
-| Name pool and unique-name allocations                              | Host `.local/hiscores/`                                 |
-| Video, traces, SQLite experiment state, reports                    | Host `runs/`                                            |
-| Agent modules, prompts, profiles                                   | Host `agents/`, mounted read-only in the container      |
-| Experiment configuration                                           | Host `experiments/`, mounted read-only in the container |
+Use the existing browser preset with its own state volume:
 
-Ordinary `docker compose down` retains the state volume. Use `down --volumes` for the fresh early-test workflow above; omit `--volumes` only when deliberately preserving a run for resume. The container bootstrap assigns ownership of its data directories and name database to its runtime user; on Linux these files use UID/GID 1000.
+```sh
+export SWARM_EXPERIMENT=experiments/openrouter-m1.json
+docker compose -p swarm-browser up --build -d swarm
+```
 
-Prompt/profile edits apply through the existing hot-reload path. Agent module changes need a harness restart; source/runtime changes require an image rebuild. Resume requires the same experiment configuration. The image uses the reviewed npm lock and pinned public RS-SDK Git revision; host `.git`, `.env`, worlds, names, and recordings are excluded from its build context.
+Open [the live desktop](http://localhost:6080/vnc.html?autoconnect=true&resize=scale). This mode starts Chromium tabs, Xvfb, noVNC, and FFmpeg. Recording captures the visible desktop at 10 fps and cycles the focused tab every 30 seconds. Manual tab changes affect the recording; login URLs can appear. Videos are in `runs/RUN_ID/recordings/recording-UUID/session.mp4`, with a timeline beside them. A recording failure leaves agents running within their original budget/deadline but marks the run incomplete.
 
-The [official Node image](https://hub.docker.com/_/node) and [official Bun image](https://bun.sh/guides/ecosystem/docker) supply the runtimes. noVNC provides the [browser desktop client](https://github.com/novnc/noVNC/blob/master/docs/EMBEDDING.md). Only `127.0.0.1:6080` is published; game, gateway, VNC, and Chromium-control ports remain inside the container. Chromium runs as the `node` user with its sandbox disabled inside this container; it is intended for the local game desktop.
+Use the same project name and `SWARM_EXPERIMENT` value for subsequent commands. Unset `SWARM_EXPERIMENT` to return to the headless default. Never switch presets against an existing experiment's state volume.
+
+## Persistence and configuration
+
+| Data | Location |
+|---|---|
+| World, player saves, client metadata, active-run pointer | Project's `swarm-state` volume |
+| Name pool and unique-name allocations | Host `.local/hiscores/` |
+| Traces, SQLite ledger, reports, optional videos | Host `runs/` |
+| Agent modules, prompts, profiles | Host `agents/`, mounted read-only |
+| Experiment configuration | Host `experiments/`, mounted read-only |
+
+For a custom experiment set `SWARM_EXPERIMENT=experiments/YOUR_FILE.json`. The image currently contains only world `m1`; retain that world ID. Native operation also uses fixed ports. Multi-world orchestration is deferred.
+
+Prompt/profile edits apply at task boundaries. Agent module edits require a harness restart; runtime changes require rebuilding the image. Resume requires identical experiment configuration. Credentials, local worlds, names, and recordings are excluded from the image build. Data ownership inside the container is UID/GID 1000.
+
+Only `127.0.0.1:6080` is published; game login, SDK gateway, management, and Chromium-control ports stay inside the container. The headless proxy exposes approved read-only spectator/cache routes and observations for managed agents. Browser mode runs Chromium with its sandbox disabled inside the container and is intended for the local game desktop.
 
 ## Verification limit
 
-State preservation/restart selection, browser flags, startup cancellation, Compose configuration, shell syntax, and the existing offline suite are checked locally. The image also runs `npm run check` during its build. **Docker image build, Linux Chromium/noVNC startup, and the full recorded test have not been verified in the coding sandbox: access to the Docker daemon is denied.** If startup fails, inspect `docker compose logs swarm`; engine details are in `/app/.local/worlds/m1/engine.log` inside the container.
+Offline lifecycle, configuration, trace, and route checks run locally and during image builds. Docker image execution, live Linux/Bun clients, accelerated behavior, and server capacity have not been validated in the coding sandbox. Inspect `docker compose -p swarm-headless logs swarm` and `/app/.local/worlds/m1/engine.log` or `lite-AGENT_ID.log` inside the container if startup fails. Follow the staged [server calibration](../HEADLESS.md#calibration-on-concepcion) before expanding population or speed.

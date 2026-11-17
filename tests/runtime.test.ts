@@ -13,7 +13,7 @@ import type {
 import { Store } from "../src/store.ts";
 import { Trace } from "../src/trace.ts";
 import { Gate } from "../src/inference.ts";
-import { runTask } from "../src/runtime.ts";
+import { runTask, restoreConversation, validateMessages } from "../src/runtime.ts";
 import { gatherer } from "../agents/gatherer.ts";
 import { runebench } from "../agents/runebench.ts";
 import { createGame } from "../src/game.ts";
@@ -166,7 +166,7 @@ test("real Pi follow-up sees changed memory and one fresh tableau; saved Context
   );
 });
 
-test("Pi SDK baseline executes snippets and keeps large observations out of repeated model context", async (t) => {
+test("Pi SDK baseline preserves large code, results and complete conversation context", async (t) => {
   const deps = await setup(t);
   deps.raw.nearbyLocs = Array.from({ length: 500 }, (_, id) => ({
     id,
@@ -177,7 +177,7 @@ test("Pi SDK baseline executes snippets and keeps large observations out of repe
   const scripts: string[] = [];
   deps.game.executeCode = async (code) => {
     scripts.push(code);
-    return { ok: true, result: "x".repeat(15000), world: null };
+    return { ok: true, result: "x".repeat(50000), world: null };
   };
   let requests = 0;
   const sent: Context[] = [];
@@ -185,7 +185,6 @@ test("Pi SDK baseline executes snippets and keeps large observations out of repe
     {
       ...deps,
       definition: runebench,
-      limits: { ...deps.limits, contextBytes: 20000 },
       provider: {
         model,
         upperUsd: 0,
@@ -199,7 +198,7 @@ test("Pi SDK baseline executes snippets and keeps large observations out of repe
                   type: "toolCall",
                   id: `code${requests}`,
                   name: "execute_code",
-                  arguments: { code: "return sdk.getInventory();" },
+                  arguments: { code: "//" + "x".repeat(17000) + "\nreturn sdk.getInventory();", timeoutSeconds: 600, world: "full" },
                 },
               ],
               "toolUse",
@@ -212,8 +211,16 @@ test("Pi SDK baseline executes snippets and keeps large observations out of repe
   );
   assert.equal(result.status, "completed", result.reason);
   assert.equal(scripts.length, 4);
+  assert.ok(scripts.every((code) => code.length > 16000));
+  assert.ok(Buffer.byteLength(JSON.stringify(sent.at(-1))) > 65536);
+  const results = sent.at(-1)!.messages.filter((m) => m.role === "toolResult");
+  assert.equal(results.length, 4);
+  for (const result of results) {
+    const content = result.content[0];
+    assert.equal(content.type, "text");
+    if (content.type === "text") assert.equal(JSON.parse(content.text).result.length, 50000);
+  }
   for (const context of sent) {
-    assert.ok(Buffer.byteLength(JSON.stringify(context)) <= 20000);
     assert.doesNotMatch(
       JSON.stringify(context),
       /RAW_OBJECT_SENTINEL|live-state/,
@@ -260,6 +267,51 @@ test("state is collected after queue admission", async (t) => {
   assert.ok(content.includes("9876"));
 });
 
+test("the next task restores the complete conversation from the durable journal", async (t) => {
+  const deps = await setup(t);
+  let calls = 0;
+  const sent: Context[] = [];
+  const provider = {
+    model, upperUsd: 0, capUsd: 0,
+    stream: (_m: any, context: Context) => {
+      sent.push(structuredClone(context));
+      if (++calls === 1) return response([{
+        type: "toolCall", id: "remember", name: "read_memory", arguments: {},
+      }], "toolUse");
+      return response([{ type: "text", text: "PREVIOUS_TASK_FINDING" }]);
+    },
+  };
+  const first = await runTask({ ...deps, definition: runebench, provider }, new AbortController().signal);
+  assert.equal(first.status, "completed", first.reason);
+  const reopened = new Store(join(deps.dir, "state.sqlite"));
+  t.after(() => reopened.close());
+  const previous = restoreConversation(reopened, key);
+  validateMessages(previous);
+  assert.equal(previous.filter((m) => m.role === "toolResult").length, 1);
+  const second = await runTask({
+    ...deps, store: reopened, trace: new Trace(deps.dir, reopened, 10000000),
+    definition: runebench, provider,
+  }, new AbortController().signal);
+  assert.equal(second.status, "completed", second.reason);
+  assert.match(JSON.stringify(sent.at(-1)), /PREVIOUS_TASK_FINDING/);
+  assert.equal(sent.at(-1)!.messages.filter((m) => m.role === "toolResult").length, 1);
+});
+
+test("restoring an interrupted tool exchange records uncertainty without replaying it", async (t) => {
+  const deps = await setup(t);
+  const message = await response([{
+    type: "toolCall", id: "unfinished", name: "execute_code", arguments: { code: "await bot.trade('bob');" },
+  }], "toolUse").result();
+  deps.store.append(key, { type: "message_end", data: JSON.parse(JSON.stringify({ message })) });
+  const messages = restoreConversation(deps.store, key);
+  validateMessages(messages);
+  const last = messages.at(-1)!;
+  assert.equal(last.role, "toolResult");
+  if (last.role === "toolResult") assert.equal(last.isError, true);
+  assert.match(JSON.stringify(last), /Outcome unknown/);
+  assert.equal(deps.store.events(key).length, 1);
+});
+
 test("SDK worker loss prevents new provider calls", async (t) => {
   const deps = await setup(t);
   deps.game.observe = () => {
@@ -285,19 +337,19 @@ test("SDK worker loss prevents new provider calls", async (t) => {
   assert.equal(result.status, "failed");
   assert.equal(calls, 0);
 });
-test("request and tool bounds terminate without retrying provider calls", async (t) => {
+test("tasks continue beyond the former request and tool ceilings", async (t) => {
   const deps = await setup(t);
   let calls = 0;
   const result = await runTask(
     {
       ...deps,
-      limits: { ...deps.limits, requests: 2, tools: 1 },
       provider: {
         model,
         upperUsd: 0,
         capUsd: 0,
         stream: () => {
           calls++;
+          if (calls > 18) return response([{ type: "text", text: "done" }]);
           return response(
             [
               {
@@ -314,11 +366,11 @@ test("request and tool bounds terminate without retrying provider calls", async 
     },
     new AbortController().signal,
   );
-  assert.equal(calls, 2);
-  assert.equal(result.tools, 1);
-  assert.equal(result.status, "limited");
+  assert.equal(calls, 19);
+  assert.equal(result.tools, 18);
+  assert.equal(result.status, "completed");
 });
-test("context ceiling and failed trace block provider dispatch and settle local failures", async (t) => {
+test("failed traces still block provider dispatch and settle local failures", async (t) => {
   const deps = await setup(t);
   let calls = 0;
   const provider = {
@@ -330,12 +382,6 @@ test("context ceiling and failed trace block provider dispatch and settle local 
       return response([]);
     },
   };
-  const r = await runTask(
-    { ...deps, provider, limits: { ...deps.limits, contextBytes: 1 } },
-    new AbortController().signal,
-  );
-  assert.equal(calls, 0);
-  assert.equal(r.status, "failed");
   deps.trace.context = async () => {
     throw new Error("disk full");
   };
@@ -386,7 +432,7 @@ test("aborting a task holds inference admission until the source stream settles"
   (await next).finish(0);
 });
 
-test("task deadline cancels a stalled context hook before dispatch and releases admission", async (t) => {
+test("explicit cancellation stops a stalled context hook and releases admission", async (t) => {
   const deps = await setup(t),
     gate = new Gate(1, deps.store);
   let calls = 0;
@@ -394,7 +440,6 @@ test("task deadline cancels a stalled context hook before dispatch and releases 
     {
       ...deps,
       gate,
-      limits: { ...deps.limits, taskSeconds: 0.02 },
       definition: { ...gatherer, buildContext: () => new Promise(() => {}) },
       provider: {
         model,
@@ -406,7 +451,7 @@ test("task deadline cancels a stalled context hook before dispatch and releases 
         },
       },
     },
-    new AbortController().signal,
+    AbortSignal.timeout(20),
   );
   const result = await Promise.race([task, delay(200).then(() => null)]);
   assert.ok(

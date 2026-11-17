@@ -1,5 +1,4 @@
 import { connectGame, type GameClient } from "./game.ts";
-import { boundedScriptResult } from "./code-tools.ts";
 
 let game: GameClient | undefined;
 let stateTimer: ReturnType<typeof setInterval> | undefined;
@@ -54,13 +53,11 @@ process.on("message", async (message: any) => {
     } else if (method === "prepare") {
       await game!.prepare!(controller.signal);
     } else if (method === "execute") {
-      value = boundedScriptResult(
-        await game!.executeCode!(
-          params.code,
-          params.timeoutMs,
-          controller.signal,
-          params.world,
-        ),
+      value = await game!.executeCode!(
+        params.code,
+        params.timeoutMs,
+        controller.signal,
+        params.world,
       );
     } else throw new Error("Unknown worker operation");
     publish();

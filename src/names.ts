@@ -13,6 +13,7 @@ export function allocateNames(
   path: string,
   scope: string,
   agentIds: string[],
+  reservedNames: string[] = [],
 ): { agentId: string; username: string; displayName: string }[] {
   const db = new DatabaseSync(path);
   try {
@@ -29,25 +30,23 @@ export function allocateNames(
       username: string;
       displayName: string;
     }[];
-    if (saved.length) {
-      if (
-        saved.length !== agentIds.length ||
-        agentIds.some((id) => !saved.some((n) => n.agentId === id))
-      )
-        throw new Error("name allocation roster mismatch");
-      db.exec("COMMIT");
-      return agentIds.map((id) => ({
-        ...saved.find((n) => n.agentId === id)!,
-      }));
-    }
+    if (new Set(agentIds).size !== agentIds.length)
+      throw new Error("Duplicate requested agent IDs");
+    const missing = agentIds.filter(
+      (id) => !saved.some((n) => n.agentId === id),
+    );
     const names = db
       .prepare(
         `SELECT name_key AS username,display_name AS displayName FROM names
       WHERE NOT EXISTS(SELECT 1 FROM allocations a WHERE a.name_key=names.name_key)
+      AND name_key NOT IN (SELECT value FROM json_each(?))
       ORDER BY random() LIMIT ?`,
       )
-      .all(agentIds.length) as { username: string; displayName: string }[];
-    if (names.length < agentIds.length)
+      .all(JSON.stringify(reservedNames), missing.length) as {
+      username: string;
+      displayName: string;
+    }[];
+    if (names.length < missing.length)
       throw new Error(
         "name pool exhausted; collect more names before creating this roster",
       );
@@ -59,12 +58,18 @@ export function allocateNames(
         throw new Error("name pool contains an invalid game username");
       db.prepare("INSERT INTO allocations VALUES(?,?,?)").run(
         scope,
-        agentIds[index],
+        missing[index],
         name.username,
       );
     }
     db.exec("COMMIT");
-    return names.map((n, i) => ({ agentId: agentIds[i], ...n }));
+    const combined = [
+      ...saved,
+      ...names.map((n, i) => ({ agentId: missing[i], ...n })),
+    ];
+    return agentIds.map((id) => ({
+      ...combined.find((n) => n.agentId === id)!,
+    }));
   } catch (error) {
     try {
       db.exec("ROLLBACK");

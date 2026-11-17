@@ -13,7 +13,7 @@ const memory = {
   relationships: {},
   nextAction: "observe",
 };
-test("memory is private, revisioned, strict, bounded and durable across a fresh process", (t) => {
+test("memory is private, revisioned, strict and durable across a fresh process", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-store-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "state.sqlite");
@@ -29,20 +29,12 @@ test("memory is private, revisioned, strict, bounded and durable across a fresh 
       store.updateMemory(alice, 1, { ...memory, coins: 100 } as any, "agent"),
     /fields/,
   );
-  assert.throws(
-    () =>
-      store.updateMemory(
-        alice,
-        1,
-        { ...memory, plan: ["x".repeat(17000)] },
-        "agent",
-      ),
-    /size/,
-  );
+  const largeMemory = { ...memory, plan: ["x".repeat(100000)] };
+  assert.equal(store.updateMemory(alice, 1, largeMemory, "agent").revision, 2);
   assert.equal(
     store.events(alice, 0, 50).filter((e) => e.type === "memory_updated")
       .length,
-    1,
+    2,
   );
   store.beginAction(alice, "trade1", { kind: "trade_accept" });
   store.close();
@@ -59,7 +51,8 @@ test("memory is private, revisioned, strict, bounded and durable across a fresh 
   );
   assert.equal(child.status, 0, child.stderr);
   const [saved, pending] = JSON.parse(child.stdout);
-  assert.equal(saved.revision, 1);
+  assert.equal(saved.revision, 2);
+  assert.deepEqual(saved.value, largeMemory);
   assert.equal(pending[0].actionId, "trade1");
 });
 test("unknown usage retains reservations and settled requests cannot be charged twice", (t) => {

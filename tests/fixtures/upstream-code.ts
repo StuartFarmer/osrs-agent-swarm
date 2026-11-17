@@ -69,3 +69,15 @@ const timeout = await executeCode(
   { world: "none" },
 );
 assert.equal(timeout.structuredContent.error.kind, "timeout");
+const untimed = await executeCode(
+  manager, "fixture",
+  "await new Promise(resolve => setTimeout(resolve, 50)); return 'x'.repeat(100000);",
+  undefined, undefined, undefined, { world: "none" },
+);
+assert.equal(untimed.structuredContent.ok, true);
+assert.equal(untimed.structuredContent.result.length, 100000);
+const cancelled = await executeCode(
+  manager, "fixture", "await new Promise(() => {});",
+  undefined, AbortSignal.timeout(30), undefined, { world: "none" },
+);
+assert.equal(cancelled.structuredContent.error.kind, "cancelled");

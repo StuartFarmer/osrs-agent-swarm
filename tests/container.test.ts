@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { seedContainerWorld, containerRunId } from "../docker/state.ts";
+import {
+  seedContainerWorld,
+  containerRunId,
+  containerRunPath,
+} from "../docker/state.ts";
 import {
   SDK_REVISION,
   worldPath,
@@ -50,6 +54,24 @@ test("container restart selects the persisted run and refuses corrupt state", as
   await assert.rejects(containerRunId(pointer), /identifier/);
   await writeFile(pointer, "broken");
   await assert.rejects(containerRunId(pointer));
+});
+
+test("named container runs preserve the original run and resume their own pointer", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "swarm-named-run-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, ".local"));
+  const original = containerRunPath(root);
+  const expanded = containerRunPath(root, "scale25");
+  assert.equal(original, join(root, ".local", "container-run.json"));
+  await writeJson(original, { runId: "run-ten" });
+  assert.equal(await containerRunId(expanded), undefined);
+  await writeJson(expanded, { runId: "run-twentyfive" });
+  assert.equal(
+    await containerRunId(containerRunPath(root, "scale25")),
+    "run-twentyfive",
+  );
+  assert.equal(await containerRunId(original), "run-ten");
+  assert.throws(() => containerRunPath(root, "../../escape"), /identifier/);
 });
 
 test("container Chrome flags keep the control port local and do not affect host Chrome", () => {

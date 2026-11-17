@@ -130,9 +130,9 @@ export type GameClient = {
   prepare?(signal: AbortSignal): Promise<void>;
   executeCode?(
     code: string,
-    timeoutMs: number,
+    timeoutMs: number | undefined,
     signal: AbortSignal,
-    world: "brief" | "none",
+    world: "brief" | "full" | "none",
   ): Promise<unknown>;
   execute(action: GameAction, signal: AbortSignal): Promise<ActionOutcome>;
   close(): Promise<void>;

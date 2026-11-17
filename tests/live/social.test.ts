@@ -12,10 +12,11 @@ import type { GameClient, GameAction } from "../../src/game.ts";
 import { verifyRuntime, acquireWorldLock } from "../../src/run.ts";
 import { Store } from "../../src/store.ts";
 import { Trace } from "../../src/trace.ts";
+import type { startLite } from "../../src/lite.ts";
 import { json } from "../../src/agent-definition.ts";
 
 test(
-  "three rendered characters: public/DM isolation, follow, trade and pickup",
+  "three characters: public/DM isolation, follow, trade and pickup",
   {
     skip:
       process.env.SWARM_LIVE_GAME !== "1"
@@ -28,7 +29,9 @@ test(
     verifyRuntime();
     const world = await readWorld(process.env.SWARM_SMOKE_WORLD ?? "m1smoke"),
       release = await acquireWorldLock(world.dir);
+    const headless = process.env.SWARM_CLIENT_MODE === "headless";
     let browser: BrowserHandle | undefined;
+    let lite: Awaited<ReturnType<typeof startLite>> | undefined;
     let store: Store | undefined;
     const games: GameClient[] = [];
     try {
@@ -38,9 +41,15 @@ test(
         profilePath: "unused",
         instructionsPath: "unused",
       }));
-      console.error("[smoke] Opening three rendered clients...");
+      console.error(
+        `[smoke] Opening three ${headless ? "headless" : "rendered"} clients...`,
+      );
       const accounts = await accountsFor(world, entries);
-      browser = await startBrowser(world, accounts);
+      if (headless)
+        lite = await (
+          await import("../../src/lite.ts")
+        ).startLite(world, accounts);
+      else browser = await startBrowser(world, accounts);
       const runId = "smoke-" + randomUUID(),
         dir = join(world.dir, runId);
       await mkdir(dir);
@@ -225,15 +234,19 @@ test(
         assert.equal(count(0, item.id), aliceBefore - 1);
         assert.equal(count(1, item.id), bobBefore + 1);
         checks.tradeDeltas = true;
-        const path = await trace.capture(
-          key(0),
-          randomUUID(),
-          await browser.capture("alice"),
-        );
-        database.append(key(0), { type: "screenshot", data: { path } });
+        if (browser) {
+          const path = await trace.capture(
+            key(0),
+            randomUUID(),
+            await browser.capture("alice"),
+          );
+          database.append(key(0), { type: "screenshot", data: { path } });
+        }
       } finally {
         await writeJson(join(world.dir, "social-smoke.json"), {
           mode: "live",
+          clientMode: headless ? "headless" : "browser",
+          tickMs: world.tickMs,
           revision: SDK_REVISION,
           at: new Date().toISOString(),
           runId,
@@ -241,7 +254,7 @@ test(
           checks,
         });
       }
-      console.error("[smoke] All social checks passed; screenshot saved.");
+      console.error("[smoke] All social checks passed; evidence saved.");
     } catch (error) {
       console.error(
         "[smoke] Failed:",
@@ -252,6 +265,7 @@ test(
       await Promise.allSettled(games.map((g) => g.close()));
       try {
         await browser?.close();
+        if (lite) await (await import("../../src/lite.ts")).stopLite(world);
       } finally {
         try {
           store?.close();

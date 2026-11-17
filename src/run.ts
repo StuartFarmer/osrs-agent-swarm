@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createServer } from "node:net";
 import { mkdir, readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -12,8 +11,15 @@ import { Gate, createProvider } from "./inference.ts";
 import { connectGame } from "./game.ts";
 import type { GameClient } from "./game.ts";
 import { attachBrowser, accountsFor } from "./browser.ts";
+import { attachLite } from "./lite.ts";
 import type { BrowserHandle } from "./browser.ts";
-import { readWorld, writeJson, SDK_REVISION } from "./world.ts";
+import {
+  readWorld,
+  writeJson,
+  SDK_REVISION,
+  acquireWorldLock,
+  worldStats,
+} from "./world.ts";
 import { runTask } from "./runtime.ts";
 import { json } from "./agent-definition.ts";
 import { merchant } from "../agents/merchant.ts";
@@ -33,12 +39,21 @@ export type RunManifest = {
   experiment: Experiment;
   configHash: string;
   mode: "live";
+  worldEpoch?: string;
 };
 export type RunReport = {
   runId: string;
   status: "completed" | "incomplete";
   elapsedSeconds: number;
   spendingUsd: number;
+  failureReason?: string;
+  worldTiming?: {
+    configuredTickMs: number;
+    elapsedTicks: number;
+    elapsedWallSeconds: number;
+    achievedSpeed: number;
+    last: Awaited<ReturnType<typeof worldStats>>;
+  };
   recording?: RecordingResult | { status: "failed"; error: string };
   agents: Record<
     string,
@@ -52,26 +67,7 @@ export type RunReport = {
   >;
 };
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
-export async function acquireWorldLock(
-  identity: string,
-): Promise<() => Promise<void>> {
-  const port = 30000 + (parseInt(hash(identity).slice(0, 8), 16) % 20000),
-    server = createServer((socket) => socket.end());
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", (e: NodeJS.ErrnoException) =>
-      reject(
-        e.code === "EADDRINUSE"
-          ? new Error("world is already owned or its lock port is in use")
-          : e,
-      ),
-    );
-    server.listen(port, "127.0.0.1", resolve);
-  });
-  return () =>
-    new Promise<void>((resolve, reject) =>
-      server.close((e) => (e ? reject(e) : resolve())),
-    );
-}
+export { acquireWorldLock } from "./world.ts";
 export async function waitForReady(
   games: Pick<GameClient, "ready">[],
   timeoutMs: number,
@@ -190,14 +186,23 @@ export async function startRun(
       "Explicit model endpoint, credential, tariffs and budget are required; no model calls made",
     );
   verifyRuntime();
+  const headless = experiment.clientMode === "headless";
+  if (headless && options.record)
+    throw new Error(
+      "Headless clients cannot record game canvases; use the spectator feed",
+    );
   if (options.record) await verifyRecorder();
   const root = resolve(options.root ?? process.cwd()),
     world = await readWorld(experiment.world.id, root);
   if (
     world.gameUrl !== experiment.world.gameUrl ||
-    world.gatewayUrl !== experiment.world.gatewayUrl
+    world.gatewayUrl !== experiment.world.gatewayUrl ||
+    world.tickMs !== experiment.world.tickMs ||
+    world.xpRate !== experiment.world.xpRate
   )
-    throw new Error("world endpoint mismatch");
+    throw new Error(
+      "world endpoint or timing mismatch; start the world with the experiment tick rate",
+    );
   const provider = createProvider(
     experiment.model,
     experiment.limits.outputTokens,
@@ -210,9 +215,16 @@ export async function startRun(
     dir = runDirectory(runId, root);
   let store: Store | undefined,
     browser: BrowserHandle | undefined,
+    clients:
+      | (Pick<BrowserHandle, "connected" | "close"> & {
+          lost?: () => Promise<string | undefined>;
+        })
+      | undefined,
     deadlineTimer: ReturnType<typeof setTimeout> | undefined;
   const games = new Map<string, GameClient>();
   let recording: Promise<void> | undefined;
+  let monitoring: Promise<void> | undefined;
+  let timingStart: { tick: number; wall: number } | undefined;
   let releaseRecording: (() => Promise<void>) | undefined;
   try {
     const configHash = hash(JSON.stringify(experiment));
@@ -237,6 +249,7 @@ export async function startRun(
         experiment,
         configHash,
         mode: "live",
+        worldEpoch: world.epoch,
       };
       await writeJson(join(dir, "manifest.json"), manifest);
       await options.onRunCreated?.(runId);
@@ -269,6 +282,18 @@ export async function startRun(
       agentId: id,
     });
     if (manifest.deadline !== null && Date.now() >= manifest.deadline) {
+      if (headless) {
+        try {
+          const previous = JSON.parse(
+            await readFile(join(dir, "report.json"), "utf8"),
+          ) as RunReport;
+          if (previous.runId !== runId)
+            throw new Error("Saved report belongs to another run");
+          return previous;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
       report.elapsedSeconds = (Date.now() - manifest.startedAt!) / 1000;
       for (const a of Object.values(report.agents))
         a.reason =
@@ -276,7 +301,9 @@ export async function startRun(
       await writeJson(join(dir, "report.json"), report);
       return report;
     }
-    browser = await attachBrowser(world, accounts);
+    clients = headless
+      ? await attachLite(world, accounts)
+      : (browser = await attachBrowser(world, accounts));
     const prep = AbortSignal.any([
       signal,
       AbortSignal.timeout(experiment.preparationSeconds * 1000),
@@ -313,6 +340,20 @@ export async function startRun(
       experiment.preparationSeconds * 1000,
       prep,
     );
+    if (headless) {
+      const stats = await worldStats();
+      if (stats.tickRate !== world.tickMs)
+        throw new Error("Effective world tick rate changed");
+      timingStart = { tick: stats.tick, wall: Date.now() };
+      store!.append(key(accounts[0].agentId), {
+        type: "world_start",
+        data: json({
+          epoch: world.epoch,
+          resume: !!options.resumeRunId,
+          ...stats,
+        }),
+      });
+    }
     if (!manifest.startedAt) {
       const baselines = [...games].map(([id, g]) => {
         const o = g.observe();
@@ -377,6 +418,31 @@ export async function startRun(
           );
         });
     }
+    if (headless && clients.lost)
+      monitoring = (async () => {
+        try {
+          while (!signal.aborted) {
+            await delay(5000, undefined, { signal });
+            const lost = await clients!.lost!();
+            if (lost) {
+              store!.append(key(lost), {
+                type: "agent_unavailable",
+                data: { reason: "headless session exited" },
+              });
+              await trace.flush(key(lost));
+              throw new Error(
+                `Headless session lost: ${lost}; reconcile before resuming`,
+              );
+            }
+          }
+        } catch (error) {
+          if (!signal.aborted) {
+            report.failureReason =
+              error instanceof Error ? error.message : String(error);
+            controller.abort(error);
+          }
+        }
+      })();
     const tasks = experiment.agents.map(async (a) => {
       let profile = (await reloadProfile(root, a)).profile;
       const moduleHash = hash(
@@ -384,7 +450,12 @@ export async function startRun(
       );
       store!.append(key(a.id), {
         type: "harness_attached",
-        data: { moduleHash, resume: !!options.resumeRunId },
+        data: {
+          moduleHash,
+          resume: !!options.resumeRunId,
+          clientMode: experiment.clientMode ?? "browser",
+          tickMs: world.tickMs,
+        },
       });
       while (!signal.aborted) {
         const changed = await reloadProfile(root, a, profile);
@@ -399,13 +470,24 @@ export async function startRun(
           profile = changed.profile;
         }
         const game = games.get(a.id)!;
-        if (!(await browser!.connected(a.id))) {
+        if (!(await clients!.connected(a.id))) {
           store!.append(key(a.id), {
             type: "agent_unavailable",
-            data: { reason: "rendered tab missing" },
+            data: {
+              reason: headless
+                ? "headless session exited"
+                : "rendered tab missing",
+            },
           });
           await trace.flush(key(a.id));
-          report.agents[a.id].reason = "rendered tab missing";
+          report.agents[a.id].reason = headless
+            ? "headless session exited"
+            : "rendered tab missing";
+          if (headless) {
+            report.failureReason = `Headless session lost: ${a.id}; reconcile before resuming`;
+            controller.abort(new Error(report.failureReason));
+            break;
+          }
           await delay(experiment.failureDelayMs, undefined, { signal }).catch(
             () => {},
           );
@@ -439,7 +521,8 @@ export async function startRun(
         if (result.status !== "completed") {
           stats.failures++;
           try {
-            const png = await browser!.capture(a.id);
+            if (!browser) throw new Error("Headless mode has no game canvas");
+            const png = await browser.capture(a.id);
             const path = await trace.capture(key(a.id), randomUUID(), png);
             store!.append(key(a.id), {
               type: "screenshot",
@@ -460,10 +543,45 @@ export async function startRun(
       }
     });
     const settled = await Promise.allSettled(tasks);
+    controller.abort();
+    await monitoring;
     await recording;
     report.elapsedSeconds = (Date.now() - manifest.startedAt!) / 1000;
+    if (headless) {
+      try {
+        const last = await worldStats();
+        const elapsedTicks = last.tick - timingStart!.tick;
+        const elapsedWallSeconds = (Date.now() - timingStart!.wall) / 1000;
+        if (last.tickRate !== world.tickMs || elapsedTicks < 0)
+          throw new Error("Engine clock changed during the run");
+        report.worldTiming = {
+          configuredTickMs: world.tickMs,
+          elapsedTicks,
+          elapsedWallSeconds,
+          achievedSpeed:
+            elapsedWallSeconds > 0
+              ? (elapsedTicks * 0.4) / elapsedWallSeconds
+              : 0,
+          last,
+        };
+        store!.append(key(accounts[0].agentId), {
+          type: "world_end",
+          data: json(report.worldTiming),
+        });
+        await trace.flush(key(accounts[0].agentId));
+      } catch (error) {
+        report.failureReason =
+          error instanceof Error ? error.message : String(error);
+        store!.append(key(accounts[0].agentId), {
+          type: "world_timing_failed",
+          data: { message: report.failureReason },
+        });
+      }
+    }
+
     report.spendingUsd = store.spending();
     report.status =
+      !report.failureReason &&
       Date.now() >= manifest.deadline! &&
       settled.every((r) => r.status === "fulfilled") &&
       report.recording?.status !== "failed"
@@ -482,10 +600,11 @@ export async function startRun(
   } finally {
     if (deadlineTimer) clearTimeout(deadlineTimer);
     controller.abort();
+    await monitoring;
     await recording;
     await releaseRecording?.();
     await Promise.allSettled([...games.values()].map((g) => g.close()));
-    await browser?.close();
+    await clients?.close();
     store?.close();
     await release();
   }

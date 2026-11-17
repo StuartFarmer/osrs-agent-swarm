@@ -142,7 +142,6 @@ export function createTools(
   store: Store,
   trace: Trace,
   definition: AgentDefinition,
-  memoryBytes = 16384,
 ): AgentTool[] {
   function tool(
     name: string,
@@ -209,7 +208,7 @@ export function createTools(
       "Replace your private memory at the expected revision.",
       obj({ expectedRevision: int(), value: memory }),
       async (a) => {
-        validateMemory(a.value, memoryBytes);
+        validateMemory(a.value);
         const m = store.updateMemory(key, a.expectedRevision, a.value, "agent");
         await trace.flush(key);
         return m;

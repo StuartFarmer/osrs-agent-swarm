@@ -1,0 +1,97 @@
+{
+  "clientMode": "headless",
+  "world": {
+    "id": "m1",
+    "gameUrl": "http://127.0.0.1:8888",
+    "gatewayUrl": "ws://127.0.0.1:7780",
+    "tickMs": 400,
+    "xpRate": 1
+  },
+  "durationSeconds": 1800,
+  "preparationSeconds": 300,
+  "concurrency": 4,
+  "healthyDelayMs": 1000,
+  "failureDelayMs": 5000,
+  "limits": {
+    "outputTokens": 2048,
+    "freshnessMs": 3000,
+    "artifactBytes": 1073741824
+  },
+  "model": {
+    "provider": "openrouter",
+    "modelId": "deepseek/deepseek-v4.1-flash-1017",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "contextWindow": 65536,
+    "costLimitUsd": 5,
+    "zeroCost": false,
+    "rates": {
+      "input": 0.05,
+      "output": 0.5,
+      "cacheRead": 0.05,
+      "cacheWrite": 0.05
+    }
+  },
+  "agents": [
+    {
+      "id": "agent1",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent1.json",
+      "instructionsPath": "agents/profiles/agent1.md"
+    },
+    {
+      "id": "agent2",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent2.json",
+      "instructionsPath": "agents/profiles/agent2.md"
+    },
+    {
+      "id": "agent3",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent3.json",
+      "instructionsPath": "agents/profiles/agent3.md"
+    },
+    {
+      "id": "agent4",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent4.json",
+      "instructionsPath": "agents/profiles/agent4.md"
+    },
+    {
+      "id": "agent5",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent5.json",
+      "instructionsPath": "agents/profiles/agent5.md"
+    },
+    {
+      "id": "agent6",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent6.json",
+      "instructionsPath": "agents/profiles/agent6.md"
+    },
+    {
+      "id": "agent7",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent7.json",
+      "instructionsPath": "agents/profiles/agent7.md"
+    },
+    {
+      "id": "agent8",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent8.json",
+      "instructionsPath": "agents/profiles/agent8.md"
+    },
+    {
+      "id": "agent9",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent9.json",
+      "instructionsPath": "agents/profiles/agent9.md"
+    },
+    {
+      "id": "agent10",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent10.json",
+      "instructionsPath": "agents/profiles/agent10.md"
+    }
+  ]
+}

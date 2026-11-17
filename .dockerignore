@@ -15,6 +15,9 @@
 !docker/**
 !scripts/
 !scripts/collect_hiscore_names.py
+!scripts/prepare-sdk.mjs
+!scripts/prepare-viewer.mjs
+!scripts/viewer-revision.txt
 !scripts/test_collect_hiscore_names.py
 **/.env*
 **/node_modules

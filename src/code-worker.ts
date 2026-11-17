@@ -43,7 +43,7 @@ export class WorkerRpc {
     method: string,
     params: unknown,
     signal: AbortSignal,
-    timeoutMs: number,
+    timeoutMs?: number,
   ): Promise<any> {
     signal.throwIfAborted();
     if (this.stopped) throw new Error("SDK worker closed");
@@ -54,7 +54,8 @@ export class WorkerRpc {
       // A CPU-bound script cannot handle cancellation; stop its process before releasing the call.
       killTimer ??= setTimeout(() => this.child.kill("SIGKILL"), 1000);
     };
-    const timer = setTimeout(cancel, timeoutMs);
+    const timer =
+      timeoutMs === undefined ? undefined : setTimeout(cancel, timeoutMs);
     signal.addEventListener("abort", cancel, { once: true });
     try {
       return await new Promise((resolve, reject) => {
@@ -142,6 +143,11 @@ export async function connectCodeGame(
     await rpc.call("prepare", {}, signal, 300000);
   };
   game.executeCode = (code, timeoutMs, signal, world) =>
-    rpc.call("execute", { code, timeoutMs, world }, signal, timeoutMs + 2000);
+    rpc.call(
+      "execute",
+      { code, timeoutMs, world },
+      signal,
+      timeoutMs === undefined ? undefined : timeoutMs + 2000,
+    );
   return game;
 }

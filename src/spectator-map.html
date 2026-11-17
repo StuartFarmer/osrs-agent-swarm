@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Swarm spectator</title>
+    <style>
+      body {
+        margin: 0;
+        background: #000;
+        color: #fff;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        touch-action: none;
+      }
+      #controls {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        width: fit-content;
+        max-width: calc(100% - 48px);
+        padding: 12px;
+        border: 1px solid #777;
+        border-radius: 8px;
+        background: #161b22f2;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      select,
+      button {
+        font: inherit;
+        min-height: 36px;
+        max-width: 100%;
+      }
+      :focus-visible {
+        outline: 3px solid #8bd5ff;
+        outline-offset: 3px;
+      }
+      p {
+        margin: 8px 0 0;
+      }
+      .hint {
+        color: #c0c8d2;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" aria-label="Live world map"></canvas>
+    <section id="controls" aria-label="Spectator controls">
+      <div class="row">
+        <label for="player">Player</label>
+        <select id="player" disabled></select>
+        <button id="center" type="button" disabled>Center on player</button>
+      </div>
+      <p id="status" role="status">Loading map…</p>
+      <p class="hint">
+        Read-only · Drag to pan · Scroll to zoom · Players sharing a tile
+        overlap.
+      </p>
+    </section>
+    <script type="module">
+      const canvas = document.getElementById("canvas");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const select = document.getElementById("player");
+      const center = document.getElementById("center");
+      const status = document.getElementById("status");
+      try {
+        const { MapView } = await import("/client/mapview.js");
+        MapView.shouldDrawPlayers = true;
+        // Historical traces are not exposed by the spectator proxy.
+        MapView.shouldDrawHistory = false;
+        let centered = false;
+        let roster = "";
+        const map = new (class extends MapView {
+          async fetchPlayerPositions() {
+            this.playerFetchPending = true;
+            try {
+              const response = await fetch("/playerpositions", {
+                signal: AbortSignal.timeout(5000),
+                cache: "no-store",
+              });
+              if (!response.ok)
+                throw new Error(
+                  "Player positions unavailable (HTTP " + response.status + ")",
+                );
+              const players = await response.json();
+              if (
+                !Array.isArray(players) ||
+                players.some(
+                  (p) =>
+                    !p ||
+                    typeof p.name !== "string" ||
+                    ![p.x, p.z, p.level].every(Number.isInteger),
+                )
+              )
+                throw new Error("Invalid player positions");
+              this.playerPositions = players;
+              this.updateTrails(players);
+              const names = players.map((p) => p.name).sort();
+              const nextRoster = JSON.stringify(names);
+              if (roster !== nextRoster) {
+                const selected = select.value;
+                select.replaceChildren(
+                  ...names.map((name) => new Option(name, name)),
+                );
+                if (names.includes(selected)) select.value = selected;
+                roster = nextRoster;
+              }
+              select.disabled = center.disabled = players.length === 0;
+              describe();
+              if (!centered && players.length) {
+                focus();
+                centered = true;
+              }
+              this.redraw = true;
+            } catch (error) {
+              select.disabled = center.disabled = true;
+              status.textContent =
+                "Positions unavailable; any visible markers may be stale. " +
+                error.message;
+            } finally {
+              this.playerFetchPending = false;
+            }
+          }
+        })();
+        function describe() {
+          const players = map.playerPositions;
+          const player = players.find((p) => p.name === select.value);
+          if (!player) {
+            status.textContent = "No players reported. Waiting for logins…";
+            return;
+          }
+          const together = players.filter(
+            (p) =>
+              p.x === player.x && p.z === player.z && p.level === player.level,
+          ).length;
+          status.textContent =
+            players.length +
+            " players online · " +
+            player.name +
+            " · x " +
+            player.x +
+            ", z " +
+            player.z +
+            ", level " +
+            player.level +
+            " · " +
+            together +
+            " on this tile";
+        }
+        function focus() {
+          const player = map.playerPositions.find(
+            (p) => p.name === select.value,
+          );
+          if (!player) return;
+          const z = map.remapZ(player.z);
+          if (z === -1) {
+            status.textContent += " · This location is outside the map.";
+            return;
+          }
+          MapView.shouldDrawPlayers = true;
+          map.focusX = player.x - map.mapOriginX;
+          map.focusZ = map.mapOriginZ + map.mapHeight - z;
+          map.zoom = map.targetZoom = 8;
+          map.redraw = true;
+        }
+        select.addEventListener("change", () => {
+          describe();
+          focus();
+        });
+        center.addEventListener("click", () => {
+          describe();
+          focus();
+        });
+        window.addEventListener("unhandledrejection", () => {
+          status.textContent =
+            "The map could not finish loading. Reload the page and check the connection.";
+        });
+        status.textContent = "Loading map and waiting for player positions…";
+      } catch (error) {
+        status.textContent = "Unable to load map: " + error.message;
+      }
+    </script>
+  </body>
+</html>

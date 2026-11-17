@@ -3,6 +3,9 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import type { Experiment, Profile } from "./types.ts";
 
+// The pinned engine allocates player slots 1 through 2046.
+export const MAX_WORLD_PLAYERS = 2046;
+
 export function object(
   value: unknown,
   fields: string[],
@@ -77,9 +80,11 @@ export async function loadExperiment(
   path: string,
   root = process.cwd(),
 ): Promise<Experiment> {
+  const input = JSON.parse(await readFile(path, "utf8"));
   const e = object(
-    JSON.parse(await readFile(path, "utf8")),
+    input,
     [
+      ...(Object.hasOwn(input, "clientMode") ? ["clientMode"] : []),
       "world",
       "durationSeconds",
       "preparationSeconds",
@@ -92,6 +97,12 @@ export async function loadExperiment(
     ],
     "experiment",
   );
+  if (
+    e.clientMode !== undefined &&
+    !["browser", "headless"].includes(e.clientMode as string)
+  )
+    throw new Error("clientMode must be browser or headless");
+  const headless = e.clientMode === "headless";
   const w = object(
     e.world,
     ["id", "gameUrl", "gatewayUrl", "tickMs", "xpRate"],
@@ -100,25 +111,37 @@ export async function loadExperiment(
   identifier(w.id);
   localUrl(w.gameUrl, ["http:"]);
   localUrl(w.gatewayUrl, ["ws:"]);
-  number(w.tickMs, 400, 400, "tickMs");
+  number(w.tickMs, headless ? 50 : 400, 400, "tickMs");
   number(w.xpRate, 1, 1, "xpRate");
-  number(e.durationSeconds, 1, 1800, "durationSeconds");
-  number(e.preparationSeconds, 1, 300, "preparationSeconds");
-  number(e.concurrency, 1, 4, "concurrency");
+  number(e.durationSeconds, 1, headless ? 604800 : 1800, "durationSeconds");
+  number(e.preparationSeconds, 1, headless ? 3600 : 300, "preparationSeconds");
+  number(e.concurrency, 1, headless ? MAX_WORLD_PLAYERS : 4, "concurrency");
   number(e.healthyDelayMs, 1000, 60000, "healthyDelayMs");
   number(e.failureDelayMs, 5000, 60000, "failureDelayMs");
   const maxima = {
-    requests: 8,
-    tools: 16,
-    taskSeconds: 120,
-    outputTokens: 2048,
+    outputTokens: Number.MAX_SAFE_INTEGER,
     freshnessMs: 3000,
-    contextBytes: 65536,
-    memoryBytes: 16384,
-    artifactBytes: 1073741824,
+    artifactBytes: headless ? 107374182400 : 1073741824,
   };
-  const l = object(e.limits, Object.keys(maxima), "limits");
+  // Old run manifests retain these fields for resume hashes; they no longer constrain execution.
+  const retired = [
+    "requests",
+    "tools",
+    "taskSeconds",
+    "contextBytes",
+    "memoryBytes",
+  ];
+  const l = object(
+    e.limits,
+    [
+      ...Object.keys(maxima),
+      ...retired.filter((k) => Object.hasOwn(e.limits as object, k)),
+    ],
+    "limits",
+  );
   for (const [k, max] of Object.entries(maxima)) number(l[k], 1, max, k);
+  for (const k of retired)
+    if (k in l) number(l[k], 1, Number.MAX_SAFE_INTEGER, k);
   if (e.model !== null) {
     const m = object(
       e.model,
@@ -169,8 +192,13 @@ export async function loadExperiment(
     )
       throw new Error("explicit paid tariffs and cap or zeroCost required");
   }
-  if (!Array.isArray(e.agents) || e.agents.length < 1 || e.agents.length > 10)
-    throw new Error("need 1–10 agents");
+  const maxAgents = headless ? MAX_WORLD_PLAYERS : 10;
+  if (
+    !Array.isArray(e.agents) ||
+    e.agents.length < 1 ||
+    e.agents.length > maxAgents
+  )
+    throw new Error(`need 1–${maxAgents} agents`);
   const ids = new Set();
   for (const value of e.agents) {
     const a = object(
