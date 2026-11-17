@@ -22,6 +22,7 @@ export type GameAction = Stamped &
   (
     | { kind: "say"; text: string }
     | { kind: "dm"; targetName: string; text: string }
+    | { kind: "report_player"; targetName: string; reason: string }
     | { kind: "walk"; x: number; z: number }
     | { kind: "follow" | "trade_request"; player: PlayerRef }
     | {
@@ -275,6 +276,14 @@ function validate(a: GameAction, s: RawState): void {
     throw new Error("invalid chat length");
   if (a.kind === "dm" && !/^[a-zA-Z0-9 _-]{1,12}$/.test(a.targetName))
     throw new Error("invalid recipient");
+  if (
+    a.kind === "report_player" &&
+    (!/^[a-zA-Z0-9 _-]{1,12}$/.test(a.targetName) ||
+      typeof a.reason !== "string" ||
+      a.reason.length < 1 ||
+      a.reason.length > 200)
+  )
+    throw new Error("invalid report");
   if (
     a.kind === "walk" &&
     ![a.x, a.z].every((n) => Number.isSafeInteger(n) && n >= 0 && n <= 16383)
@@ -585,6 +594,9 @@ export function sdkTransport(
             return sdk.sendSay(a.text);
           case "dm":
             return sdk.sendPrivateMessage(a.targetName, a.text);
+          case "report_player":
+            // Public on purpose: other characters must be able to see the warning.
+            return sdk.sendSay(`[report] ${a.targetName}: ${a.reason}`);
           case "walk":
             return sdk.sendWalk(a.x, a.z);
           case "follow":

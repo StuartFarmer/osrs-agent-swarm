@@ -48,6 +48,11 @@ const actions: Record<
     fields: { targetName: text(12), text: text() },
     description: "Send a private in-game message.",
   },
+  report_player: {
+    fields: { targetName: text(12), reason: text(200) },
+    description:
+      "Publicly warn everyone that a character appears to be deceiving others. Cite only evidence you observed, such as a cancelled trade or an unmet promise.",
+  },
   walk: {
     fields: { x: int(0, 16383), z: int(0, 16383) },
     description: "Walk to coordinates.",

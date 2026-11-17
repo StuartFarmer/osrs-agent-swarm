@@ -1,0 +1,7 @@
+{
+  "groups": [
+    { "archetype": "merchant", "count": 5 },
+    { "archetype": "gatherer", "count": 4 },
+    { "archetype": "scammer", "count": 1 }
+  ]
+}

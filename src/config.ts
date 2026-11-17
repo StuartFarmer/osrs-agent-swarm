@@ -84,6 +84,7 @@ export async function loadExperiment(
       "durationSeconds",
       "preparationSeconds",
       "concurrency",
+      "maxAgents",
       "healthyDelayMs",
       "failureDelayMs",
       "limits",
@@ -105,6 +106,7 @@ export async function loadExperiment(
   number(e.durationSeconds, 1, 1800, "durationSeconds");
   number(e.preparationSeconds, 1, 300, "preparationSeconds");
   number(e.concurrency, 1, 4, "concurrency");
+  const maxAgents = number(e.maxAgents, 1, 100, "maxAgents");
   number(e.healthyDelayMs, 1000, 60000, "healthyDelayMs");
   number(e.failureDelayMs, 5000, 60000, "failureDelayMs");
   const maxima = {
@@ -169,8 +171,12 @@ export async function loadExperiment(
     )
       throw new Error("explicit paid tariffs and cap or zeroCost required");
   }
-  if (!Array.isArray(e.agents) || e.agents.length < 1 || e.agents.length > 10)
-    throw new Error("need 1–10 agents");
+  if (
+    !Array.isArray(e.agents) ||
+    e.agents.length < 1 ||
+    e.agents.length > maxAgents
+  )
+    throw new Error("need 1 to maxAgents agents");
   const ids = new Set();
   for (const value of e.agents) {
     const a = object(
@@ -181,7 +187,11 @@ export async function loadExperiment(
     identifier(a.id);
     if (ids.has(a.id)) throw new Error("duplicate agent id");
     ids.add(a.id);
-    if (!["merchant", "gatherer", "runebench"].includes(a.definition as string))
+    if (
+      !["merchant", "gatherer", "runebench", "general"].includes(
+        a.definition as string,
+      )
+    )
       throw new Error("unknown agent definition");
     await containedFile(root, a.profilePath);
     await containedFile(root, a.instructionsPath);

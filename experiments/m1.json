@@ -9,6 +9,7 @@
   "durationSeconds": 1800,
   "preparationSeconds": 300,
   "concurrency": 4,
+  "maxAgents": 10,
   "healthyDelayMs": 1000,
   "failureDelayMs": 5000,
   "limits": {
@@ -24,64 +25,64 @@
   "model": null,
   "agents": [
     {
-      "id": "agent1",
-      "definition": "merchant",
-      "profilePath": "agents/profiles/agent1.json",
-      "instructionsPath": "agents/profiles/agent1.md"
+      "id": "merchant-01",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
     },
     {
-      "id": "agent2",
-      "definition": "gatherer",
-      "profilePath": "agents/profiles/agent2.json",
-      "instructionsPath": "agents/profiles/agent2.md"
+      "id": "merchant-02",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
     },
     {
-      "id": "agent3",
-      "definition": "merchant",
-      "profilePath": "agents/profiles/agent3.json",
-      "instructionsPath": "agents/profiles/agent3.md"
+      "id": "merchant-03",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
     },
     {
-      "id": "agent4",
-      "definition": "gatherer",
-      "profilePath": "agents/profiles/agent4.json",
-      "instructionsPath": "agents/profiles/agent4.md"
+      "id": "merchant-04",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
     },
     {
-      "id": "agent5",
-      "definition": "merchant",
-      "profilePath": "agents/profiles/agent5.json",
-      "instructionsPath": "agents/profiles/agent5.md"
+      "id": "merchant-05",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
     },
     {
-      "id": "agent6",
-      "definition": "gatherer",
-      "profilePath": "agents/profiles/agent6.json",
-      "instructionsPath": "agents/profiles/agent6.md"
+      "id": "gatherer-01",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
     },
     {
-      "id": "agent7",
-      "definition": "merchant",
-      "profilePath": "agents/profiles/agent7.json",
-      "instructionsPath": "agents/profiles/agent7.md"
+      "id": "gatherer-02",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
     },
     {
-      "id": "agent8",
-      "definition": "gatherer",
-      "profilePath": "agents/profiles/agent8.json",
-      "instructionsPath": "agents/profiles/agent8.md"
+      "id": "gatherer-03",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
     },
     {
-      "id": "agent9",
-      "definition": "merchant",
-      "profilePath": "agents/profiles/agent9.json",
-      "instructionsPath": "agents/profiles/agent9.md"
+      "id": "gatherer-04",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
     },
     {
-      "id": "agent10",
-      "definition": "gatherer",
-      "profilePath": "agents/profiles/agent10.json",
-      "instructionsPath": "agents/profiles/agent10.md"
+      "id": "scammer-01",
+      "definition": "general",
+      "profilePath": "agents/archetypes/scammer/profile.json",
+      "instructionsPath": "agents/archetypes/scammer/instructions.md"
     }
   ]
 }

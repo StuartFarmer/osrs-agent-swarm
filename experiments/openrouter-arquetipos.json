@@ -1,0 +1,102 @@
+{
+  "world": {
+    "id": "m1",
+    "gameUrl": "http://127.0.0.1:8888",
+    "gatewayUrl": "ws://127.0.0.1:7780",
+    "tickMs": 400,
+    "xpRate": 1
+  },
+  "durationSeconds": 1800,
+  "preparationSeconds": 300,
+  "concurrency": 4,
+  "maxAgents": 10,
+  "healthyDelayMs": 1000,
+  "failureDelayMs": 5000,
+  "limits": {
+    "requests": 8,
+    "tools": 16,
+    "taskSeconds": 120,
+    "outputTokens": 2048,
+    "freshnessMs": 3000,
+    "contextBytes": 65536,
+    "memoryBytes": 16384,
+    "artifactBytes": 1073741824
+  },
+  "model": {
+    "provider": "openrouter",
+    "modelId": "deepseek/deepseek-v4.1-flash-1017",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "contextWindow": 65536,
+    "costLimitUsd": 5,
+    "zeroCost": false,
+    "rates": {
+      "input": 0.05,
+      "output": 0.5,
+      "cacheRead": 0.05,
+      "cacheWrite": 0.05
+    }
+  },
+  "agents": [
+    {
+      "id": "merchant-01",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
+    },
+    {
+      "id": "merchant-02",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
+    },
+    {
+      "id": "merchant-03",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
+    },
+    {
+      "id": "merchant-04",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
+    },
+    {
+      "id": "merchant-05",
+      "definition": "general",
+      "profilePath": "agents/archetypes/merchant/profile.json",
+      "instructionsPath": "agents/archetypes/merchant/instructions.md"
+    },
+    {
+      "id": "gatherer-01",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
+    },
+    {
+      "id": "gatherer-02",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
+    },
+    {
+      "id": "gatherer-03",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
+    },
+    {
+      "id": "gatherer-04",
+      "definition": "general",
+      "profilePath": "agents/archetypes/gatherer/profile.json",
+      "instructionsPath": "agents/archetypes/gatherer/instructions.md"
+    },
+    {
+      "id": "scammer-01",
+      "definition": "general",
+      "profilePath": "agents/archetypes/scammer/profile.json",
+      "instructionsPath": "agents/archetypes/scammer/instructions.md"
+    }
+  ]
+}

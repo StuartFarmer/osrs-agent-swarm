@@ -21,8 +21,9 @@ import { recordSession, verifyRecorder } from "./recording.ts";
 import type { RecordingResult } from "./recording.ts";
 import { gatherer } from "../agents/gatherer.ts";
 import { runebench } from "../agents/runebench.ts";
+import { general } from "../agents/general.ts";
 import { connectCodeGame } from "./code-worker.ts";
-export const definitions = { merchant, gatherer, runebench };
+export const definitions = { merchant, gatherer, runebench, general };
 export type RunManifest = {
   runId: string;
   worldId: string;

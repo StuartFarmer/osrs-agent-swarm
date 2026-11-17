@@ -218,3 +218,30 @@ test("readiness reports unexpected snapshot errors instead of silently waiting",
     /snapshot conversion failed/,
   );
 });
+
+test("report_player is validated and dispatched as public chat", async () => {
+  const f = fixture();
+  const stamp = f.stamp();
+  const ok = await f.game.execute(
+    {
+      kind: "report_player",
+      stamp,
+      targetName: "bob",
+      reason: "trade cancelled after promise",
+    },
+    signal,
+  );
+  assert.equal(ok.status, "dispatched");
+  assert.equal(f.sent(), 1);
+  const bad = await f.game.execute(
+    { kind: "report_player", stamp, targetName: "bob<script>", reason: "x" },
+    signal,
+  );
+  assert.equal(bad.status, "failed");
+  const empty = await f.game.execute(
+    { kind: "report_player", stamp, targetName: "bob", reason: "" },
+    signal,
+  );
+  assert.equal(empty.status, "failed");
+  assert.equal(f.sent(), 1);
+});

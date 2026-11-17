@@ -16,8 +16,10 @@ import { validateMemory } from "./store.ts";
 import { Trace } from "./trace.ts";
 import { recordSession, verifyRecorder } from "./recording.ts";
 import { checkAcceptance } from "./acceptance.ts";
+import { expandExperiment } from "./expand.ts";
 const help = `RuneScape swarm POC (run from the repository root)
   world create|start|stop WORLD_ID
+  experiment expand --template experiments/m1.template.json --groups experiments/m1.groups.json --out experiments/m1.json
   clients start --experiment experiments/m1.json
   run --experiment experiments/m1.json [--resume RUN_ID] [--record]
   record --run RUN_ID
@@ -40,6 +42,9 @@ async function main(): Promise<number> {
       agent: { type: "string" },
       "expected-revision": { type: "string" },
       file: { type: "string" },
+      template: { type: "string" },
+      groups: { type: "string" },
+      out: { type: "string" },
     },
   });
   const [command, sub, id] = positionals;
@@ -57,6 +62,20 @@ async function main(): Promise<number> {
         : sub === "start"
           ? startWorld(id)
           : stopWorld(id)),
+    );
+    return 0;
+  }
+  if (command === "experiment") {
+    if (sub !== "expand" || !values.template || !values.groups || !values.out)
+      throw new Error(
+        "Use experiment expand --template PATH --groups PATH --out PATH",
+      );
+    print(
+      await expandExperiment({
+        template: values.template,
+        groups: values.groups,
+        out: values.out,
+      }),
     );
     return 0;
   }

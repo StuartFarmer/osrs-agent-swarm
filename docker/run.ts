@@ -19,7 +19,13 @@ import { seedContainerWorld, containerRunId } from "./state.ts";
 
 const exec = promisify(execFile);
 const { values } = parseArgs({
-  options: { "view-only": { type: "boolean" } },
+  options: {
+    "view-only": { type: "boolean" },
+    experiment: {
+      type: "string",
+      default: "experiments/openrouter-m1.json",
+    },
+  },
 });
 const controller = new AbortController(),
   signal = controller.signal;
@@ -31,7 +37,8 @@ let stopping = false,
   worldStarted = false,
   browserStarted = false,
   failure: unknown;
-const experiment = await loadExperiment("experiments/openrouter-m1.json");
+// Experiments are mounted read-only under /app/experiments; choose one with --experiment.
+const experiment = await loadExperiment(values.experiment);
 
 function launch(command: string, args: string[]) {
   const child = spawn(command, args, {

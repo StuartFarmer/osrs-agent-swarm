@@ -9,6 +9,7 @@
   "durationSeconds": 1800,
   "preparationSeconds": 300,
   "concurrency": 4,
+  "maxAgents": 10,
   "healthyDelayMs": 1000,
   "failureDelayMs": 5000,
   "limits": {

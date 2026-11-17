@@ -71,7 +71,7 @@ function safeIntent(
     for (const field of fields)
       if (field in action) result[field] = json((action as any)[field]);
   };
-  if (domains.chat !== undefined) copy(["text", "targetName"]);
+  if (domains.chat !== undefined) copy(["text", "targetName", "reason"]);
   if (domains.position !== undefined) copy(["x", "z"]);
   if (domains.nearby !== undefined)
     copy(["player", "target", "option", "skill", "durationSeconds"]);

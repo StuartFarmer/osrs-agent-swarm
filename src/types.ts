@@ -35,7 +35,7 @@ export type Limits = {
 };
 export type AgentEntry = {
   id: string;
-  definition: "merchant" | "gatherer" | "runebench";
+  definition: "merchant" | "gatherer" | "runebench" | "general";
   profilePath: string;
   instructionsPath: string;
 };
@@ -50,6 +50,7 @@ export type Experiment = {
   durationSeconds: number;
   preparationSeconds: number;
   concurrency: number;
+  maxAgents: number;
   healthyDelayMs: number;
   failureDelayMs: number;
   limits: Limits;
