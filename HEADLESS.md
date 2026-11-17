@@ -53,6 +53,8 @@ The lite client explicitly has no canvas and does not fetch models/textures. Its
 
 A future **passive client mirror** could reuse the original browser renderer without another game login, but it is not present in the pinned source. It would need a complete initial client state, subsequent packet/state updates, cache loading, and suppression of gameplay output. Joining only the incremental packet stream midway through a session is insufficient. It also needs local-only tab/camera interaction to inspect stats without changing the agent's actions. This is an engineering option, not a tested capability.
 
+See [the passive-client mirror research](PASSIVE-CLIENT-MIRROR.md) for the LostCityRS revision-289 findings, reusable packet/rendering hooks, late-attachment options, and a proposed one-agent validation.
+
 The smaller option is to render original-looking stats/inventory/chat panels from the SDK observations already available, reusing cache sprites and interface definitions where practical. This preserves headless execution but remains an observer UI rather than an exact client-screen mirror.
 
 ## Grow the existing world to 25 agents
