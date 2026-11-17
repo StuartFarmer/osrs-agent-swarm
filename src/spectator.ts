@@ -6,9 +6,15 @@ import {
 } from "node:http";
 import type { WorldHandle } from "./world.ts";
 import { localUrl } from "./config.ts";
-import { readFileSync } from "node:fs";
+import { readFileSync, createReadStream } from "node:fs";
+import { resolve } from "node:path";
+import { spectatorAgents, spectatorState } from "./spectator-state.ts";
+import { viewerAsset } from "./viewer-assets.ts";
 
 const mapPage = readFileSync(new URL("./spectator-map.html", import.meta.url));
+const watchPage = readFileSync(
+  new URL("./spectator-watch.html", import.meta.url),
+);
 
 // Only spectator and public cache routes: never forward logins, gateway control or management.
 export function spectatorPath(
@@ -22,12 +28,21 @@ export function spectatorPath(
   } catch {
     return null;
   }
-  if (url.search || url.hash) return null;
+  if (url.hash) return null;
+  if (url.pathname.startsWith("/viewer/")) return url.pathname;
+  if (url.search) return null;
+  if (
+    /^\/spectator\/agents(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63})?$/.test(
+      url.pathname,
+    )
+  )
+    return url.pathname;
   if (
     [
       "/",
       "/mapview",
       "/mapview/",
+      "/watch/",
       "/playerpositions",
       "/worldmap.jag",
       "/client/mapview.js",
@@ -48,55 +63,113 @@ export function spectatorPath(
 }
 
 export function startSpectator(
-  world: Pick<WorldHandle, "gameUrl">,
+  world: Pick<WorldHandle, "gameUrl"> &
+    Partial<Pick<WorldHandle, "dir" | "gatewayUrl">>,
   port = 6080,
   hostname = "127.0.0.1",
 ): Promise<Server> {
   const origin = new URL(localUrl(world.gameUrl, ["http:"]));
   const sockets = new Set<import("node:net").Socket>();
-  const server = createServer((req, res) => {
-    const path = spectatorPath(req.method, req.url ?? "/");
-    if (!path || path === "/worldfeed") {
-      res.writeHead(404).end("Not found");
-      return;
-    }
-    if (path === "/") {
-      res.writeHead(302, { Location: "/mapview/" }).end();
-      return;
-    }
-    if (path === "/mapview" || path === "/mapview/") {
-      res
-        .writeHead(200, {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store",
-          "X-Content-Type-Options": "nosniff",
-        })
-        .end(mapPage);
-      return;
-    }
-    const upstream = request(
-      new URL(path, origin),
-      { method: "GET" },
-      (response) => {
-        res.writeHead(response.statusCode ?? 502, {
-          "Content-Type":
-            response.headers["content-type"] ?? "application/octet-stream",
-          "Cache-Control": "no-store",
-          "X-Content-Type-Options": "nosniff",
+  const server = createServer(async (req, res) => {
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    try {
+      const path = spectatorPath(req.method, req.url ?? "/");
+      if (!path || path === "/worldfeed") {
+        res.writeHead(404).end("Not found");
+        return;
+      }
+      if (path === "/") {
+        res.writeHead(302, { Location: "/watch/" }).end();
+        return;
+      }
+      if (path === "/watch/") {
+        res
+          .writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+          .end(watchPage);
+        return;
+      }
+      if (path.startsWith("/spectator/agents")) {
+        if (!world.dir || !world.gatewayUrl) {
+          res.writeHead(503).end("Agent roster unavailable");
+          return;
+        }
+        const source = { dir: world.dir, gatewayUrl: world.gatewayUrl };
+        const result =
+          path === "/spectator/agents"
+            ? { status: 200, body: await spectatorAgents(source) }
+            : await spectatorState(
+                source,
+                path.slice("/spectator/agents/".length),
+              );
+        res
+          .writeHead(result.status, { "Content-Type": "application/json" })
+          .end(JSON.stringify(result.body));
+        return;
+      }
+      if (path.startsWith("/viewer/")) {
+        const asset = await viewerAsset(
+          process.env.SWARM_VIEWER_DIR ?? resolve(".local/viewer"),
+          path,
+        );
+        if (!asset) {
+          res
+            .writeHead(404, { "Content-Type": "text/plain; charset=utf-8" })
+            .end(
+              "3D viewer asset unavailable. Rebuild the image with the viewer, or use /mapview/.",
+            );
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": asset.type,
+          "Content-Length": asset.size,
         });
-        response.on("error", () => res.destroy());
-        response.pipe(res);
-      },
-    );
-    upstream.setTimeout(30000, () =>
-      upstream.destroy(new Error("Spectator upstream timeout")),
-    );
-    upstream.on("error", () => {
-      if (!res.headersSent) res.writeHead(502);
-      res.end("World unavailable");
-    });
-    res.on("close", () => upstream.destroy());
-    upstream.end();
+        const stream = createReadStream(asset.path);
+        stream.on("error", () => res.destroy());
+        res.on("close", () => stream.destroy());
+        stream.pipe(res);
+        return;
+      }
+      if (path === "/mapview" || path === "/mapview/") {
+        res
+          .writeHead(200, {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+          })
+          .end(mapPage);
+        return;
+      }
+      const upstream = request(
+        new URL(path, origin),
+        { method: "GET" },
+        (response) => {
+          res.writeHead(response.statusCode ?? 502, {
+            "Content-Type":
+              response.headers["content-type"] ?? "application/octet-stream",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+          });
+          response.on("error", () => res.destroy());
+          response.pipe(res);
+        },
+      );
+      upstream.setTimeout(30000, () =>
+        upstream.destroy(new Error("Spectator upstream timeout")),
+      );
+      upstream.on("error", () => {
+        if (!res.headersSent) res.writeHead(502);
+        res.end("World unavailable");
+      });
+      res.on("close", () => upstream.destroy());
+      upstream.end();
+    } catch {
+      if (!res.headersSent)
+        res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Spectator data unavailable" }));
+    }
   });
   server.on("connection", (socket) => {
     sockets.add(socket);

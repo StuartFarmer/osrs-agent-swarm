@@ -22,7 +22,7 @@ docker compose logs -f swarm
 
 The first build downloads dependencies, prepares the game world, and runs the image's checks. Keep the API key out of committed files. The configured experiment starts paid inference after all ten characters are ready: **30 minutes, four concurrent model requests, and a $5 ledger cap per run**. See [the inference runbook](docs/milestone-1.md#configure-inference) for accounting limits.
 
-Open **[the read-only map](http://localhost:6080/mapview/)** to see live player positions. The headless container starts the server, lite clients, and harness without Chromium, Xvfb, or recording. Traces and reports are written to `runs/`; saved worlds and client metadata live in the Compose `swarm-state` volume. The image still includes browser dependencies for the optional rendered preset. See [headless operation and calibration](HEADLESS.md). Name collection is optional: a fresh checkout uses synthetic names unless you supply a collected pool.
+Open **[the 3D spectator](http://localhost:6080/watch/)** to follow characters and inspect their published game state. The [2D map](http://localhost:6080/mapview/) is also available. The headless container starts the server, lite clients, and harness without Chromium, Xvfb, or recording. Traces and reports are written to `runs/`; saved worlds and client metadata live in the Compose `swarm-state` volume. The image still includes browser dependencies for the optional rendered preset. See [headless operation and calibration](HEADLESS.md). Name collection is optional: a fresh checkout uses synthetic names unless you supply a collected pool.
 
 ```sh
 docker compose stop swarm  # Stop the harness, clients, and world.

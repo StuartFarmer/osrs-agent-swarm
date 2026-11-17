@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Swarm · 3D spectator</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #11161d;
+        color: #edf1f6;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      header {
+        padding: 12px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid #455264;
+      }
+      a {
+        color: #9cdbff;
+      }
+      button,
+      select {
+        font: inherit;
+        min-height: 36px;
+        max-width: 100%;
+      }
+      :focus-visible {
+        outline: 3px solid #9cdbff;
+        outline-offset: 2px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        height: calc(100dvh - 70px);
+      }
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #000;
+      }
+      aside {
+        padding: 16px;
+        overflow-y: auto;
+        border-left: 1px solid #455264;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0;
+      }
+      h2 {
+        font-size: 15px;
+        margin: 18px 0 8px;
+      }
+      p {
+        line-height: 1.45;
+      }
+      #status {
+        color: #ffd58a;
+      }
+      .hint {
+        color: #b7c4d4;
+        font-size: 12px;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      li {
+        margin-bottom: 5px;
+        overflow-wrap: anywhere;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font:
+          12px/1.5 ui-monospace,
+          monospace;
+      }
+      details {
+        border-top: 1px solid #455264;
+        padding: 12px 0;
+      }
+      summary {
+        cursor: pointer;
+      }
+      @media (max-width: 800px) {
+        main {
+          display: block;
+          height: auto;
+        }
+        iframe {
+          height: 60dvh;
+        }
+        aside {
+          border-left: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Swarm spectator</h1>
+      <label for="agent">Agent</label
+      ><select id="agent" disabled></select>
+      <button id="follow" type="button" disabled>Follow selected agent</button>
+      <a href="/mapview/">2D map</a>
+      <a href="/viewer/" target="_blank" rel="noopener">Open 3D view</a>
+    </header>
+    <main>
+      <iframe id="scene" src="/viewer/" title="Live 3D game world"></iframe>
+      <aside aria-label="Selected agent observation">
+        <p id="connection" role="status">Loading 3D viewer…</p>
+        <p class="hint">
+          Pick an agent above, choose one in the 3D player list, or right-click
+          a character and choose Follow. Drag to orbit; scroll to zoom. WASD
+          releases the camera.
+        </p>
+        <h2 id="selected">Agent observation</h2>
+        <p class="hint">
+          Read-only SDK state from this character. The 3D camera follows the
+          character; this is not a screenshot of its client or its model prompt.
+        </p>
+        <p id="status" role="status">Loading agent roster…</p>
+        <p id="player"></p>
+        <h2>Inventory</h2>
+        <ul id="inventory"></ul>
+        <details>
+          <summary>Equipment</summary>
+          <ul id="equipment"></ul>
+        </details>
+        <details>
+          <summary>Skills</summary>
+          <ul id="skills"></ul>
+        </details>
+        <details open>
+          <summary>Dialogue and interfaces</summary>
+          <pre id="dialogue"></pre>
+        </details>
+        <details>
+          <summary>Bank, shop and trade</summary>
+          <pre id="commerce"></pre>
+        </details>
+        <details open>
+          <summary>Messages visible to this character</summary>
+          <ul id="messages"></ul>
+        </details>
+        <details>
+          <summary>Nearby entities and items</summary>
+          <pre id="nearby"></pre>
+        </details>
+        <details>
+          <summary>Full published observation</summary>
+          <pre id="raw"></pre>
+        </details>
+      </aside>
+    </main>
+    <script type="module">
+      const byId = (id) => document.getElementById(id);
+      const picker = byId("agent"),
+        scene = byId("scene"),
+        follow = byId("follow");
+      const status = byId("status"),
+        connection = byId("connection");
+      let agents = [],
+        selected,
+        initialized = false,
+        rosterKey = "",
+        request,
+        version = 0;
+      let observedAt = 0,
+        stateAge = 0,
+        stateStatus = "unknown",
+        polling = false;
+      const normalize = (name) => name.toLowerCase().replaceAll(" ", "_");
+      function clear() {
+        for (const id of [
+          "player",
+          "inventory",
+          "equipment",
+          "skills",
+          "dialogue",
+          "commerce",
+          "messages",
+          "nearby",
+          "raw",
+        ])
+          byId(id).replaceChildren();
+        observedAt = 0;
+      }
+      function list(id, rows) {
+        byId(id).replaceChildren(
+          ...rows.map((text) => {
+            const li = document.createElement("li");
+            li.textContent = text;
+            return li;
+          }),
+        );
+      }
+      function aim() {
+        const agent = agents.find((a) => a.id === selected);
+        if (agent)
+          scene.contentWindow.postMessage(
+            { type: "swarm-follow", name: agent.name },
+            location.origin,
+          );
+      }
+      function age() {
+        if (!observedAt) return;
+        const seconds = (stateAge + performance.now() - observedAt) / 1000;
+        status.textContent =
+          (stateStatus === "active" && seconds <= 8
+            ? "Live observation"
+            : "Stale observation — " + stateStatus) +
+          " · " +
+          seconds.toFixed(1) +
+          "s old";
+      }
+      async function choose(id, moveCamera = true) {
+        request?.abort();
+        version++;
+        polling = false;
+        selected = id;
+        picker.value = id ?? "";
+        clear();
+        const agent = agents.find((a) => a.id === id);
+        follow.disabled = !agent;
+        byId("selected").textContent = agent
+          ? agent.id + " · " + agent.name
+          : "Agent observation";
+        if (!agent) {
+          status.textContent =
+            "This player is not in the managed agent roster.";
+          return;
+        }
+        status.textContent = "Waiting for this agent’s observation…";
+        if (moveCamera) aim();
+        await poll();
+      }
+      async function poll() {
+        if (!selected || polling || document.hidden) return;
+        polling = true;
+        const current = version;
+        const controller = (request = new AbortController());
+        try {
+          const response = await fetch(
+            "/spectator/agents/" + encodeURIComponent(selected),
+            {
+              signal: AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(6000),
+              ]),
+              cache: "no-store",
+            },
+          );
+          if (!response.ok)
+            throw new Error(
+              "Observation unavailable (HTTP " + response.status + ")",
+            );
+          const result = await response.json();
+          if (current !== version) return;
+          if (result.agent?.id !== selected || !result.state)
+            throw new Error("Observation identity mismatch");
+          const s = result.state,
+            p = s.player;
+          observedAt = performance.now();
+          stateAge = result.stateAgeMs;
+          stateStatus = result.status;
+          age();
+          byId("player").textContent = p
+            ? "x " +
+              p.worldX +
+              ", z " +
+              p.worldZ +
+              ", level " +
+              p.level +
+              " · HP " +
+              p.hp +
+              "/" +
+              p.maxHp +
+              " · Run energy " +
+              p.runEnergy +
+              " · Tick " +
+              s.tick
+            : "Character is not yet in game.";
+          for (const id of ["inventory", "equipment"])
+            list(
+              id,
+              (s[id] ?? []).map(
+                (item) =>
+                  "Slot " + item.slot + ": " + item.name + " × " + item.count,
+              ),
+            );
+          list(
+            "skills",
+            (s.skills ?? []).map(
+              (skill) =>
+                skill.name +
+                ": " +
+                skill.level +
+                "/" +
+                skill.baseLevel +
+                " · " +
+                skill.experience +
+                " XP",
+            ),
+          );
+          list(
+            "messages",
+            (s.gameMessages ?? []).map(
+              (message) =>
+                (message.sender ? message.sender + ": " : "") + message.text,
+            ),
+          );
+          byId("dialogue").textContent = JSON.stringify(
+            {
+              dialog: s.dialog,
+              recentDialogs: s.recentDialogs,
+              interface: s.interface,
+              modalOpen: s.modalOpen,
+            },
+            null,
+            2,
+          );
+          byId("commerce").textContent = JSON.stringify(
+            { bank: s.bank, shop: s.shop, trade: s.trade, ge: s.ge },
+            null,
+            2,
+          );
+          byId("nearby").textContent = JSON.stringify(
+            {
+              players: s.nearbyPlayers,
+              npcs: s.nearbyNpcs,
+              locations: s.nearbyLocs,
+              groundItems: s.groundItems,
+            },
+            null,
+            2,
+          );
+          byId("raw").textContent = JSON.stringify(s, null, 2);
+        } catch (error) {
+          if (current !== version) return;
+          observedAt = 0;
+          status.textContent =
+            error.message + ". Any retained observation is stale.";
+        } finally {
+          if (current === version) polling = false;
+        }
+      }
+      async function roster() {
+        try {
+          const response = await fetch("/spectator/agents", {
+            signal: AbortSignal.timeout(5000),
+            cache: "no-store",
+          });
+          if (!response.ok) throw new Error("Roster unavailable");
+          agents = await response.json();
+          const next = JSON.stringify(agents);
+          if (next !== rosterKey) {
+            picker.replaceChildren(
+              ...agents.map((a) => new Option(a.id + " · " + a.name, a.id)),
+            );
+            if (selected) picker.value = selected;
+            rosterKey = next;
+          }
+          picker.disabled = agents.length === 0;
+          if (!initialized && agents.length) {
+            initialized = true;
+            await choose(agents[0].id);
+          } else if (selected && !agents.some((a) => a.id === selected))
+            await choose(undefined);
+          else if (!agents.length)
+            status.textContent =
+              "No managed agents yet. Waiting for client startup…";
+        } catch (error) {
+          status.textContent =
+            "Agent roster unavailable; retrying. " + error.message;
+        }
+      }
+      picker.addEventListener("change", () => choose(picker.value));
+      follow.addEventListener("click", aim);
+      window.addEventListener("message", (event) => {
+        if (
+          event.origin !== location.origin ||
+          event.source !== scene.contentWindow
+        )
+          return;
+        if (event.data?.type === "swarm-ready") {
+          connection.textContent =
+            "3D viewer ready. Its Live panel shows world-feed connection status.";
+          aim();
+        } else if (
+          event.data?.type === "swarm-selected" &&
+          typeof event.data.name === "string"
+        ) {
+          const agent = agents.find(
+            (a) => normalize(a.name) === normalize(event.data.name),
+          );
+          if (agent?.id !== selected) choose(agent?.id, false);
+        }
+      });
+      setTimeout(() => {
+        if (connection.textContent === "Loading 3D viewer…")
+          connection.textContent =
+            "3D viewer is still loading. If it stays blank, open the 3D view directly or use the 2D map.";
+      }, 30000);
+      await roster();
+      setInterval(poll, 1000);
+      setInterval(age, 1000);
+      setInterval(roster, 5000);
+    </script>
+  </body>
+</html>

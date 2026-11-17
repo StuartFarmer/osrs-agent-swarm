@@ -32,7 +32,7 @@ import { startSpectator } from "./spectator.ts";
 const help = `RuneScape swarm POC (run from the repository root)
   world create|start|stop WORLD_ID [--tick-ms 50..400]
   world stats
-  view --world WORLD_ID  (read-only map and spectator feed on localhost:6080)
+  view --world WORLD_ID  (3D spectator, agent inspector and map on localhost:6080)
   clients start|stop --experiment experiments/m1.json
   run --experiment experiments/m1.json [--resume RUN_ID] [--record]
   record --run RUN_ID
@@ -70,7 +70,7 @@ async function main(): Promise<number> {
       await readWorld(identifier(values.world)),
     );
     console.error(
-      "Read-only map: http://localhost:6080/mapview/; 3D viewer feed: ws://localhost:6080/worldfeed",
+      "3D spectator and agent inspector: http://localhost:6080/watch/; 2D map: http://localhost:6080/mapview/",
     );
     await new Promise<void>((resolve) => {
       const stop = () => server.close(() => resolve());

@@ -143,7 +143,7 @@ try {
   if (headless) {
     spectator = await startSpectator(world, 6080, "0.0.0.0");
     console.error(
-      "[container] Read-only map: http://localhost:6080/mapview/; 3D feed: ws://localhost:6080/worldfeed",
+      "[container] 3D spectator and agent inspector: http://localhost:6080/watch/; 2D map: http://localhost:6080/mapview/",
     );
   }
   console.error(

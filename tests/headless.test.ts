@@ -99,6 +99,10 @@ test("spectator routes expose map/cache/feed but never game control or arbitrary
     "/worldfeed",
     "/config123",
     "/ondemand.zip",
+    "/watch/",
+    "/spectator/agents",
+    "/spectator/agents/agent1",
+    "/viewer/",
   ])
     assert.equal(spectatorPath("GET", path), path);
   for (const path of [
@@ -111,9 +115,14 @@ test("spectator routes expose map/cache/feed but never game control or arbitrary
     "/client/../../.env",
     "/mapview/?token=secret",
     "/config/../../status",
+    "/spectator/agents/a/actions",
+    "/spectator/agents/a?password=bad",
+    "/viewer/../../.env",
   ])
     assert.equal(spectatorPath("GET", path), null, path);
   assert.equal(spectatorPath("POST", "/worldfeed"), null);
+  assert.equal(spectatorPath("POST", "/spectator/agents/a"), null);
+  assert.equal(spectatorPath("GET", "/viewer/?follow=alice"), "/viewer/");
 });
 
 test("spectator refuses nonlocal upstreams before listening", async () => {

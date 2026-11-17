@@ -1,0 +1,3 @@
+services:
+  swarm:
+    command: ["--view-only"]

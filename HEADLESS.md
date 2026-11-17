@@ -19,11 +19,17 @@ This starts the world, clients, and viewer without inference or character prepar
 ssh -L 6080:127.0.0.1:6080 user@concepcion
 ```
 
-Open <http://localhost:6080/mapview/>. It shows live player positions on the world map. The proxy also exposes `ws://localhost:6080/worldfeed` for an external 3D viewer such as upstream rs-world; that viewer is not bundled or compatibility-tested here. Viewing does not log in as an agent or consume its session. This is not a full rendered game canvas, inventory inspector, or video recording. The map's optional historical player-trace route is deliberately not exposed.
+Open <http://localhost:6080/watch/> for the **3D spectator and agent inspector**, or <http://localhost:6080/mapview/> for the 2D map. Docker bundles [RS World](https://github.com/MaxBittker/rs-world) pinned to `4b4df02829c0f31900535acae35a2707d265489c`, with cache assets converted from the same pinned engine build. Rendering runs in your browser; the game clients remain headless.
+
+Select an agent in the header or the viewer's Live panel, or right-click a character and choose **Follow**. The scene selection and inspector stay synchronized. The inspector shows that character's inventory, equipment, skills, dialogue/interfaces, bank/shop/trade, messages, nearby entities, and full published SDK observation. Selecting a different agent clears the old observation and rejects late responses from the previous selection. Observation age and stale/disconnected status are visible.
+
+This is a follow camera plus SDK state, **not a pixel-for-pixel client screen or the model's policy-filtered prompt**. Headless clients have no rendered canvas to mirror. The gateway's existing authenticated `GET /state/:username` supplies the observation without opening a controller connection or another game login. Only agents in this world's saved roster can be inspected; account passwords stay on the server. The inspector is read-only, including chat and trade. Other online characters can still be followed in 3D, but have no managed-agent inspector.
+
+The 3D scene uses the engine's world feed at `/worldfeed`; it cannot reconstruct information missing from that feed. The map's optional historical player-trace route is deliberately not exposed. Viewer source and license details are served at `/viewer/UPSTREAM-REVISION.txt` and `/viewer/UPSTREAM-LICENSE.txt`.
 
 The map centers on the first player when positions arrive. Use the player selector or **Center on player** to find a character; the status shows coordinates, level, total players, and how many share the selected tile. New characters often overlap on Tutorial Island, appearing as one yellow dot. Position updates preserve your camera position after the initial centering. Drag to pan and scroll to zoom. Connection failures are shown as stale-position warnings instead of silently presenting old markers as current. A `--view-only` launch leaves characters unprepared and does not run their AI.
 
-Only spectator/cache routes are forwarded; game login, SDK control, and management endpoints stay private. Compose publishes only `127.0.0.1:6080`. The native viewer also binds loopback.
+Only spectator/cache routes and the roster-scoped read-only observation API are exposed; game login, SDK control, and management endpoints stay private. Compose publishes only `127.0.0.1:6080`. The native viewer also binds loopback.
 
 ## Native commands
 
@@ -95,4 +101,53 @@ The schema permits 1–1,000 headless agents, 50–400 ms ticks, up to seven wal
 
 Existing SDK waits mix wall time and game ticks, and SDK worker state publication remains at its existing cadence. Acceleration must pass behavioral tests; a 50 ms setting alone is not evidence of 8× useful agent throughput. Trace quota checks still scan artifact files and event export still rereads prior JSONL, so long runs can become storage/CPU bound. Multi-day and 1,000-agent experiments remain unvalidated until these costs are measured and addressed if necessary.
 
-Offline tests exercise configuration, lifecycle, session loss, timing reports, and spectator route restrictions. Live Linux/Bun startup, the external 3D viewer, accelerated social behavior, and server capacity still require the calibration above.
+Offline tests exercise configuration, lifecycle, session loss, timing reports, static-file containment, observation authorization/redaction, and selection synchronization. The pinned 3D viewer compiles locally with its existing upstream warnings, and revision-289 cache conversion was checked. Browser rendering against the live server, accelerated social behavior, and server capacity still require validation.
+
+## Update the existing preview on concepcion
+
+The `swarm-headless` Compose project owns the existing state volume. Keep the deployment directory `~/osrs-bot-swarm-headless` so host-mounted traces and collected names also stay in place. After pushing the feature branch, run on the server:
+
+```sh
+release_dir=$(mktemp -d)
+git clone --depth 1 --single-branch --branch feat/headless-swarm \
+  https://github.com/StuartFarmer/osrs-agent-swarm.git "$release_dir/source"
+rsync -a --exclude=.git "$release_dir/source/" ~/osrs-bot-swarm-headless/
+cd ~/osrs-bot-swarm-headless
+sudo docker compose -p swarm-headless -f compose.yaml -f compose.preview.yaml build swarm
+```
+
+The temporary clone supplies source files only; rsync does not delete saved data. Build before stopping the existing preview. Stop the old foreground `--view-only` command with Ctrl-C, or stop its specific container name shown by `sudo docker ps`. Then relaunch as a regular Compose service:
+
+```sh
+sudo docker compose -p swarm-headless -f compose.yaml -f compose.preview.yaml up -d --no-build swarm
+sudo docker compose -p swarm-headless logs --tail 100 -f swarm
+```
+
+`compose.preview.yaml` keeps inference disabled and makes ordinary Compose logs work, avoiding the separate one-off `run` container. The existing saved world is reused; do not use `down --volumes`. Keep your SSH tunnel and open <http://localhost:16080/watch/> when forwarding laptop port 16080. Rebuilding changes the image, so an already-running old container must be replaced before the new viewer appears.
+
+To start a paid experiment later, export the model key and explicitly return to the base Compose configuration. If using sudo, preserve only that named credential variable:
+
+```sh
+sudo --preserve-env=OPENROUTER_API_KEY docker compose -p swarm-headless -f compose.yaml up -d --force-recreate swarm
+```
+
+## Native 3D viewer build
+
+Native `view` serves viewer assets from `.local/viewer`, or `SWARM_VIEWER_DIR` when set. To prepare them outside Docker, install Yarn Classic and run from the repository root after preparing world `m1`:
+
+```sh
+git clone https://github.com/MaxBittker/rs-world.git references/rs-world
+git -C references/rs-world checkout 4b4df02829c0f31900535acae35a2707d265489c
+node scripts/prepare-viewer.mjs references/rs-world
+cd references/rs-world
+yarn install --frozen-lockfile --ignore-scripts
+bun scripts/sync-rs-sdk-cache.ts --pack ../../.local/worlds/m1/game/server/engine/data/pack --revision 289
+CI=false PUBLIC_URL=/viewer GENERATE_SOURCEMAP=false yarn build
+cp -R caches build/caches
+cp LICENSE build/UPSTREAM-LICENSE.txt
+cp ../../scripts/viewer-revision.txt build/UPSTREAM-REVISION.txt
+cd ../..
+SWARM_VIEWER_DIR="$PWD/references/rs-world/build" npm run swarm -- view --world m1
+```
+
+Use a clean checkout at the pinned revision; the bridge patch refuses unexpected source. The viewer's dependency scripts are disabled because its optional texture-export dependency is not required. Native builds can use the successful Node 24 toolchain; Docker uses the upstream viewer's Node 20 build environment and keeps those build dependencies out of the final image.

@@ -1,6 +1,6 @@
 # Run the swarm in Docker
 
-The default experiment uses true headless clients. Docker starts the game server, SDK gateway, Bun lite clients, and Pi harness, with a read-only map on port 6080. It does not launch Chromium, a desktop, or recording in this mode. The same image retains those dependencies for the optional rendered preset.
+The default experiment uses true headless clients. Docker starts the game server, SDK gateway, Bun lite clients, and Pi harness, with a 3D spectator, agent inspector, and 2D map on port 6080. It does not launch Chromium, a desktop, or recording in this mode. The same image retains those dependencies for the optional rendered preset.
 
 ## Start the 30-minute test
 
@@ -16,7 +16,7 @@ docker compose -p swarm-headless logs -f swarm
 
 The first build installs dependencies, prepares the pinned world, and runs offline checks. The API key is supplied at runtime, never during the image build. The default `experiments/headless-m1.json` starts paid inference after preparation: ten agents, normal 400 ms ticks, 30 minutes of wall time, four concurrent requests, and a $5 ledger cap. See the [inference accounting limits](milestone-1.md#configure-inference).
 
-Open [the read-only map](http://localhost:6080/mapview/) for live player positions. For a remote server, use `ssh -L 6080:127.0.0.1:6080 user@concepcion` from your laptop. A world feed is available at `ws://localhost:6080/worldfeed`; an external 3D viewer is not bundled or validated. See [headless calibration and limitations](../HEADLESS.md).
+Open [the 3D spectator](http://localhost:6080/watch/) to follow players and inspect their SDK state; the [2D map](http://localhost:6080/mapview/) remains available. For a remote server, use `ssh -L 6080:127.0.0.1:6080 user@concepcion` from your laptop. The image bundles pinned RS World assets using the engine cache. The inspector uses authenticated read-only gateway queries and never logs in as the character. It shows SDK observations, not an exact rendered client screen. See [headless calibration and limitations](../HEADLESS.md).
 
 A new experiment configuration requires a fresh state volume. Prefer a new Compose project name to preserve the old world. Only one project can publish host port 6080 at a time. If you deliberately want to delete this project's saved world and characters:
 
@@ -50,7 +50,7 @@ docker compose -p swarm-headless down
 docker compose -p swarm-headless run --rm --service-ports swarm --view-only
 ```
 
-No API key is required. The world and clients start, but preparation, inference, and recording do not. Ctrl-C shuts down the foreground container.
+No API key is required. The world and clients start, but preparation, inference, and recording do not. Ctrl-C shuts down the foreground container. For a persistent preview with ordinary Compose logs, stop the foreground container and run `docker compose -p swarm-headless -f compose.yaml -f compose.preview.yaml up -d swarm`. See [updating concepcion](../HEADLESS.md#update-the-existing-preview-on-concepcion) for preserving the existing deployment.
 
 ## Optional rendered clients
 
@@ -79,7 +79,7 @@ For a custom experiment set `SWARM_EXPERIMENT=experiments/YOUR_FILE.json`. The i
 
 Prompt/profile edits apply at task boundaries. Agent module edits require a harness restart; runtime changes require rebuilding the image. Resume requires identical experiment configuration. Credentials, local worlds, names, and recordings are excluded from the image build. Data ownership inside the container is UID/GID 1000.
 
-Only `127.0.0.1:6080` is published; game login, SDK gateway, management, and Chromium-control ports stay inside the container. The headless proxy only forwards approved read-only spectator/cache routes. Browser mode runs Chromium with its sandbox disabled inside the container and is intended for the local game desktop.
+Only `127.0.0.1:6080` is published; game login, SDK gateway, management, and Chromium-control ports stay inside the container. The headless proxy exposes approved read-only spectator/cache routes and observations for managed agents. Browser mode runs Chromium with its sandbox disabled inside the container and is intended for the local game desktop.
 
 ## Verification limit
 
