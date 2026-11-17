@@ -1,6 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify, parseArgs } from "node:util";
-import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadExperiment } from "../src/config.ts";
 import { accountsFor, startBrowser, stopBrowser } from "../src/browser.ts";
@@ -10,7 +9,11 @@ import { verifyRecorder } from "../src/recording.ts";
 import type { Server } from "node:http";
 import { startLite, stopLite } from "../src/lite.ts";
 import { startSpectator } from "../src/spectator.ts";
-import { seedContainerWorld, containerRunId } from "./state.ts";
+import {
+  seedContainerWorld,
+  containerRunId,
+  containerRunPath,
+} from "./state.ts";
 
 const exec = promisify(execFile);
 const { values } = parseArgs({
@@ -83,14 +86,14 @@ try {
       "Export OPENROUTER_API_KEY before docker compose up, or launch with --view-only",
     );
   if (!headless) await verifyRecorder();
-  const pointer = join(process.cwd(), ".local/container-run.json");
+  const pointer = containerRunPath(process.cwd(), process.env.SWARM_RUN_NAME);
   const resumeRunId = await containerRunId(pointer);
   let finished = false;
   if (resumeRunId) {
     const previous = await readManifest(resumeRunId);
     if (JSON.stringify(previous.experiment) !== JSON.stringify(experiment))
       throw new Error(
-        "Saved experiment differs; preserve its state and use a fresh experiment volume for changed configuration",
+        "Saved experiment differs; choose a new SWARM_RUN_NAME to start a new run in this saved world. Previous runs and budgets are preserved.",
       );
     if (previous.worldId !== experiment.world.id)
       throw new Error("Saved container run belongs to another world");

@@ -42,6 +42,14 @@ export async function seedContainerWorld(
   }
   await readWorld(id, root);
 }
+export function containerRunPath(root: string, name?: string): string {
+  return join(
+    root,
+    ".local",
+    name ? `container-run-${identifier(name)}.json` : "container-run.json",
+  );
+}
+
 export async function containerRunId(
   path: string,
 ): Promise<string | undefined> {

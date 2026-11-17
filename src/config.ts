@@ -3,6 +3,9 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import type { Experiment, Profile } from "./types.ts";
 
+// The pinned engine allocates player slots 1 through 2046.
+export const MAX_WORLD_PLAYERS = 2046;
+
 export function object(
   value: unknown,
   fields: string[],
@@ -94,7 +97,10 @@ export async function loadExperiment(
     ],
     "experiment",
   );
-  if (e.clientMode !== undefined && !["browser", "headless"].includes(e.clientMode as string))
+  if (
+    e.clientMode !== undefined &&
+    !["browser", "headless"].includes(e.clientMode as string)
+  )
     throw new Error("clientMode must be browser or headless");
   const headless = e.clientMode === "headless";
   const w = object(
@@ -109,7 +115,7 @@ export async function loadExperiment(
   number(w.xpRate, 1, 1, "xpRate");
   number(e.durationSeconds, 1, headless ? 604800 : 1800, "durationSeconds");
   number(e.preparationSeconds, 1, headless ? 3600 : 300, "preparationSeconds");
-  number(e.concurrency, 1, headless ? 1000 : 4, "concurrency");
+  number(e.concurrency, 1, headless ? MAX_WORLD_PLAYERS : 4, "concurrency");
   number(e.healthyDelayMs, 1000, 60000, "healthyDelayMs");
   number(e.failureDelayMs, 5000, 60000, "failureDelayMs");
   const maxima = {
@@ -118,10 +124,19 @@ export async function loadExperiment(
     artifactBytes: headless ? 107374182400 : 1073741824,
   };
   // Old run manifests retain these fields for resume hashes; they no longer constrain execution.
-  const retired = ["requests", "tools", "taskSeconds", "contextBytes", "memoryBytes"];
+  const retired = [
+    "requests",
+    "tools",
+    "taskSeconds",
+    "contextBytes",
+    "memoryBytes",
+  ];
   const l = object(
     e.limits,
-    [...Object.keys(maxima), ...retired.filter((k) => Object.hasOwn(e.limits as object, k))],
+    [
+      ...Object.keys(maxima),
+      ...retired.filter((k) => Object.hasOwn(e.limits as object, k)),
+    ],
     "limits",
   );
   for (const [k, max] of Object.entries(maxima)) number(l[k], 1, max, k);
@@ -177,8 +192,12 @@ export async function loadExperiment(
     )
       throw new Error("explicit paid tariffs and cap or zeroCost required");
   }
-  const maxAgents = headless ? 1000 : 10;
-  if (!Array.isArray(e.agents) || e.agents.length < 1 || e.agents.length > maxAgents)
+  const maxAgents = headless ? MAX_WORLD_PLAYERS : 10;
+  if (
+    !Array.isArray(e.agents) ||
+    e.agents.length < 1 ||
+    e.agents.length > maxAgents
+  )
     throw new Error(`need 1–${maxAgents} agents`);
   const ids = new Set();
   for (const value of e.agents) {

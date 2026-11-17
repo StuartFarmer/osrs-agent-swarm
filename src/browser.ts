@@ -1,9 +1,9 @@
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile, open, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { localUrl } from "./config.ts";
+import { localUrl, identifier } from "./config.ts";
 import {
   ownsProcess,
   spawnOwned,
@@ -49,61 +49,81 @@ export async function accountsFor(
     resolve(".local/hiscores/names.sqlite"),
 ): Promise<Account[]> {
   const path = join(world.dir, "accounts.json");
-  if (existsSync(path)) {
-    const accounts = JSON.parse(await readFile(path, "utf8")) as Account[];
-    if (
-      accounts.length !== agents.length ||
-      accounts.some(
-        (a, i) =>
-          a.agentId !== agents[i].id ||
-          !/^[a-z0-9][a-z0-9_]{0,11}$/.test(a.username) ||
-          a.username.endsWith("_"),
-      )
-    )
-      throw new Error("account roster mismatch");
-    if (
-      accounts.some(
-        (a) =>
-          typeof a.password !== "string" ||
-          a.password.length < 1 ||
-          a.password.length > 20,
-      )
-    )
+  const lockPath = path + ".lock";
+  const lock = await open(lockPath, "wx", 0o600).catch((error) => {
+    if (error.code === "EEXIST")
       throw new Error(
-        "Stored account passwords must be 1–20 characters; repair incompatible credentials before starting clients.",
+        "Account roster update already in progress; if its process exited, remove " +
+          lockPath,
       );
-    return accounts;
-  }
-  const prefix = randomBytes(3).toString("hex");
-  if (process.env.SWARM_NAMES_DB && !existsSync(namePool))
-    throw new Error("configured name pool does not exist");
-  const usePool = existsSync(namePool) && hasCollectedNames(namePool);
-  if (process.env.SWARM_NAMES_DB && !usePool)
-    throw new Error("configured name pool contains no collected names");
-  const identities = usePool
-    ? allocateNames(
-        namePool,
-        resolve(world.dir),
-        agents.map((a) => a.id),
-      )
-    : agents.map((a, i) => ({
-        agentId: a.id,
-        username: "s" + prefix + String(i + 1).padStart(2, "0"),
-      }));
-  if (!usePool)
-    console.error(
-      "[names] No collected name pool yet; using synthetic names for this new roster.",
-    );
-  const accounts = identities.map((identity) => ({
-    ...identity,
-    password: "admin",
-  }));
-  await writeFile(path, JSON.stringify(accounts, null, 2), {
-    flag: "wx",
-    mode: 0o600,
+    throw error;
   });
-  return accounts;
+  try {
+    const requested = agents.map((a) => identifier(a.id));
+    if (new Set(requested).size !== requested.length)
+      throw new Error("Duplicate requested agent IDs");
+    const saved: Account[] = existsSync(path)
+      ? JSON.parse(await readFile(path, "utf8"))
+      : [];
+    if (!Array.isArray(saved)) throw new Error("Invalid saved account roster");
+    const byId = new Map<string, Account>();
+    const usernames = new Set<string>();
+    for (const a of saved) {
+      identifier(a?.agentId);
+      if (
+        byId.has(a.agentId) ||
+        usernames.has(a.username) ||
+        typeof a.username !== "string" ||
+        !/^[a-z0-9][a-z0-9_]{0,11}$/.test(a.username) ||
+        a.username.endsWith("_")
+      )
+        throw new Error("Invalid or duplicate saved account identity");
+      if (
+        typeof a.password !== "string" ||
+        !a.password.length ||
+        a.password.length > 20
+      )
+        throw new Error(
+          "Stored account passwords must be 1–20 characters; repair incompatible credentials before starting clients.",
+        );
+      byId.set(a.agentId, a);
+      usernames.add(a.username);
+    }
+    const missing = requested.filter((id) => !byId.has(id));
+    if (missing.length) {
+      if (process.env.SWARM_NAMES_DB && !existsSync(namePool))
+        throw new Error("configured name pool does not exist");
+      const usePool = existsSync(namePool) && hasCollectedNames(namePool);
+      if (process.env.SWARM_NAMES_DB && !usePool)
+        throw new Error("configured name pool contains no collected names");
+      const identities = usePool
+        ? allocateNames(namePool, resolve(world.dir), missing, [...usernames])
+        : missing.map((agentId) => {
+            let username: string;
+            do {
+              username = "s" + randomBytes(5).toString("hex");
+            } while (usernames.has(username));
+            usernames.add(username);
+            return { agentId, username };
+          });
+      if (!usePool)
+        console.error(
+          "[names] No collected name pool yet; using synthetic names for new agents.",
+        );
+      for (const identity of identities) {
+        const account = { ...identity, password: "admin" };
+        saved.push(account);
+        byId.set(account.agentId, account);
+      }
+      await writeJson(path, saved);
+    }
+    return requested.map((id) => byId.get(id)!);
+  } finally {
+    await lock.close();
+    await rm(lockPath);
+  }
 }
+
 function botName(page: Page, origin: string): string | null {
   try {
     const u = new URL(page.url());

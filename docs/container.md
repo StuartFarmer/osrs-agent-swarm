@@ -18,7 +18,7 @@ The first build installs dependencies, prepares the pinned world, and runs offli
 
 Open [the 3D spectator](http://localhost:6080/watch/) to follow players and inspect their SDK state; the [2D map](http://localhost:6080/mapview/) remains available. For a remote server, use `ssh -L 6080:127.0.0.1:6080 user@concepcion` from your laptop. The image bundles pinned RS World assets using the engine cache. The inspector uses authenticated read-only gateway queries and never logs in as the character. It shows SDK observations, not an exact rendered client screen. See [headless calibration and limitations](../HEADLESS.md).
 
-A new experiment configuration requires a fresh state volume. Prefer a new Compose project name to preserve the old world. Only one project can publish host port 6080 at a time. If you deliberately want to delete this project's saved world and characters:
+A changed experiment requires a new `SWARM_RUN_NAME`, which retains the same saved world and creates a separate run with its own deadline and budget. Existing characters are reused and newly requested agent IDs are added. See [growing to 25 agents](../HEADLESS.md#grow-the-existing-world-to-25-agents). Use a new Compose project only when you want an independent world. Only one project can publish host port 6080 at a time. If you deliberately want to delete this project's saved world and characters:
 
 ```sh
 docker compose -p swarm-headless down --volumes
@@ -39,7 +39,7 @@ docker compose -p swarm-headless stop swarm
 docker compose -p swarm-headless up -d swarm
 ```
 
-Stopping drains the harness, stops clients, then saves/stops the world. Compose allows four minutes for cleanup. Restart selects the durable active-run pointer and retains its original deadline, memory, and spending ledger. Downtime counts against the duration. If the deadline has passed, the viewer opens without new inference. Changed configuration or a corrupt/missing referenced run fails instead of resetting the budget. An exclusive filesystem lock rejects simultaneous containers using the same state volume.
+Stopping drains the harness, stops clients, then saves/stops the world. Compose allows four minutes for cleanup. Restart selects the durable active-run pointer and retains its original deadline, memory, and spending ledger. Downtime counts against the duration. If the deadline has passed, the viewer opens without new inference. Changed configuration under the same run name, or a corrupt/missing referenced run, fails instead of resetting the budget. Keep `SWARM_RUN_NAME` and `SWARM_EXPERIMENT` set when restarting a named run. An exclusive filesystem lock rejects simultaneous containers using the same state volume.
 
 The viewer and world remain available after the harness ends. Ctrl-C in `logs -f` only leaves the log viewer. Ordinary `down` retains the volume. An abrupt host shutdown can still interrupt pending actions and writes; inspect evidence before resuming.
 

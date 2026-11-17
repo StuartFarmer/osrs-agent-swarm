@@ -6,6 +6,7 @@ services:
     shm_size: 16gb
     environment:
       SWARM_EXPERIMENT: ${SWARM_EXPERIMENT:-experiments/headless-m1.json}
+      SWARM_RUN_NAME: ${SWARM_RUN_NAME:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     ports:
       - "127.0.0.1:6080:6080"

@@ -139,6 +139,66 @@ test("reused tabs reload when their stored credentials change", async () => {
   assert.equal(new URL(navigated).searchParams.get("password"), "updated");
 });
 
+test("growing and shrinking a roster preserves every saved character and credential", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "swarm-grow-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const world = { dir } as any;
+  const entries = Array.from({ length: 25 }, (_, i) => ({
+    id: `agent${i + 1}`,
+  })) as any;
+  const pool = join(dir, "missing.sqlite");
+  const first = await accountsFor(world, entries.slice(0, 10), pool);
+  first[0].password = "saved-password";
+  await writeFile(join(dir, "accounts.json"), JSON.stringify(first));
+  await writeFile(join(dir, "character-save"), "progress");
+  const expanded = await accountsFor(world, entries, pool);
+  assert.equal(expanded.length, 25);
+  assert.deepEqual(expanded.slice(0, 10), first);
+  assert.equal(new Set(expanded.map((a) => a.username)).size, 25);
+  assert.deepEqual(await accountsFor(world, [entries[24], entries[0]], pool), [
+    expanded[24],
+    expanded[0],
+  ]);
+  assert.deepEqual(
+    JSON.parse(await readFile(join(dir, "accounts.json"), "utf8")),
+    expanded,
+  );
+  assert.equal(await readFile(join(dir, "character-save"), "utf8"), "progress");
+  await assert.rejects(
+    accountsFor(world, [entries[0], entries[0]], pool),
+    /Duplicate/,
+  );
+  assert.deepEqual(await accountsFor(world, entries, pool), expanded);
+  await writeFile(join(dir, "accounts.json.lock"), "");
+  await assert.rejects(
+    accountsFor(world, entries, pool),
+    /already in progress/,
+  );
+});
+
+test("growing a collected roster keeps names reserved when allocation fails", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "swarm-grow-pool-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pool = join(dir, "names.sqlite");
+  const db = new DatabaseSync(pool);
+  db.exec(
+    "CREATE TABLE names(name_key TEXT PRIMARY KEY, display_name TEXT NOT NULL); INSERT INTO names VALUES ('alice', 'Alice')",
+  );
+  t.after(() => db.close());
+  const world = { dir } as any,
+    entries = [{ id: "a" }, { id: "b" }] as any;
+  const first = await accountsFor(world, entries.slice(0, 1), pool);
+  await assert.rejects(accountsFor(world, entries, pool), /pool exhausted/);
+  assert.deepEqual(
+    JSON.parse(await readFile(join(dir, "accounts.json"), "utf8")),
+    first,
+  );
+  db.exec("INSERT INTO names VALUES ('bob', 'Bob')");
+  const expanded = await accountsFor(world, entries, pool);
+  assert.deepEqual(expanded[0], first[0]);
+  assert.equal(expanded[1].username, "bob");
+});
+
 test("recording frames contain only the game canvas and an embedded agent label", () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   const game = { width: 765, height: 503 };

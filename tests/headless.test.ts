@@ -70,20 +70,20 @@ test("headless settings allow the requested population and speed without changin
   e.durationSeconds = 86400;
   e.preparationSeconds = 3600;
   e.concurrency = 50;
-  e.agents = Array.from({ length: 1000 }, (_, i) => ({
+  e.agents = Array.from({ length: 2046 }, (_, i) => ({
     ...e.agents[0],
     id: `agent${i}`,
   }));
   const path = join(dir, "e.json");
   await writeFile(path, JSON.stringify(e));
-  assert.equal((await loadExperiment(path)).agents.length, 1000);
+  assert.equal((await loadExperiment(path)).agents.length, 2046);
   for (const change of [
     { clientMode: "browser" },
     { clientMode: "unknown" },
     { world: { ...e.world, tickMs: 49 } },
     { agents: [...e.agents, { ...e.agents[0], id: "overflow" }] },
     { durationSeconds: 604801 },
-    { concurrency: 1001 },
+    { concurrency: 2047 },
   ]) {
     await writeFile(path, JSON.stringify({ ...e, ...change }));
     await assert.rejects(loadExperiment(path));

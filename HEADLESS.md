@@ -31,6 +31,28 @@ The map centers on the first player when positions arrive. Use the player select
 
 Only spectator/cache routes and the roster-scoped read-only observation API are exposed; game login, SDK control, and management endpoints stay private. Compose publishes only `127.0.0.1:6080`. The native viewer also binds loopback.
 
+## Grow the existing world to 25 agents
+
+After updating the source and rebuilding the image, select `experiments/headless-25.json` and a new run name. This preset uses 25 independent agents and up to 25 concurrent external model requests. It retains the 30-minute duration, 400 ms ticks, and $5 ledger cap. Agents 11–25 reuse the existing role/instruction templates; their characters, conversations, and private memory are independent.
+
+Run on concepcion from `~/osrs-bot-swarm-headless`, with `OPENROUTER_API_KEY` already exported:
+
+```sh
+export SWARM_EXPERIMENT=experiments/headless-25.json
+export SWARM_RUN_NAME=scale25
+sudo --preserve-env=OPENROUTER_API_KEY,SWARM_EXPERIMENT,SWARM_RUN_NAME \
+  docker compose -p swarm-headless -f compose.yaml up -d --no-build --force-recreate swarm
+sudo docker compose -p swarm-headless logs --tail 100 -f swarm
+```
+
+Keep the same Compose project and volume. Recreating the container gracefully stops the previous run, saves the world, and restarts its clients. Existing agent IDs retain their account names, credentials, and game progress. Missing IDs get new accounts. Removing an ID from a later experiment leaves its saved character intact. Changing the active fleet currently requires a restart; this does not add agents to an already-running harness.
+
+`SWARM_RUN_NAME` identifies an experiment's persisted run pointer, not a new world. Reusing `scale25` resumes that run with its original deadline and ledger; changing it deliberately starts a new run with its own duration and spending cap. Previous run directories and pointers remain intact. A new run starts fresh agent conversations/private memory while retaining character progress. Leave the name unset to select the original unnamed run. Each name requires an unchanged experiment configuration on resume.
+
+To grow further, copy the preset and add entries with unique agent IDs; profiles/instructions can be shared. Set `concurrency` independently of population. The former four-request setting was a smoke-test default: external inference waits on the API, while local CPU runs the engine, clients, and tools. More in-flight calls can improve throughput but also encounter provider limits and consume the budget sooner. The pinned engine has 2,046 simultaneous player slots per world; actual CPU, memory, and API capacity still need measurement.
+
+Account updates use a short exclusive `accounts.json.lock` file and an atomic roster replacement. If the process crashes during an update, stop all roster writers before removing that stale lock; do not delete `accounts.json` or character saves.
+
 ## Native commands
 
 Install Node 24, Bun 1.3.14 or later, Python 3.10+, and the dependencies documented in the README. From the repository root:
@@ -68,7 +90,7 @@ The supplied report shows 28 physical cores / 56 threads across two Xeon E5-2690
 
 1. Check ten headless sessions at 400 ms without inference. Inspect memory, client logs, and `world stats` for engine timing.
 2. Run the social smoke on a disposable world at 400 ms, then 200, 100, and 50 ms. Stop the prior world first: native ports are fixed. Create a fresh world ID for each test so the initial character state is reproducible.
-3. Run a small paid experiment after those checks pass. Change `world.tickMs` in a copied experiment and start the world with the same value. In Docker, select that experiment with `SWARM_EXPERIMENT=experiments/YOUR_FILE.json` and a fresh Compose project. Only one project can bind host port 6080 at a time.
+3. Run a small paid experiment after those checks pass. Change `world.tickMs` in a copied experiment and start the world with the same value. In Docker, select that experiment with `SWARM_EXPERIMENT=experiments/YOUR_FILE.json`. Use a new `SWARM_RUN_NAME` to retain world progress, or a fresh Compose project for an independent world. Only one project can bind host port 6080 at a time.
 4. Increase population in stages, e.g. 10, 50, 100, 250, 500, 1,000. Give each agent a unique ID. Measure resident memory, CPU, engine over-budget ticks, achieved simulation speed, API queuing/errors, and trace growth. Start a new experiment for each configuration.
 
 Example social smoke, with no model calls (choose a new world ID per tick rate):
@@ -97,7 +119,7 @@ Each run retains its manifest, SQLite ledger, per-agent JSONL events, model requ
 
 `report.json.worldTiming` records configured tick duration, observed engine ticks, wall time, and achieved speed relative to the 400 ms baseline. Timing covers the latest harness attachment segment; `world_start` and `world_end` events retain segment evidence and engine epoch. The world feed is a live, potentially lossy visual stream, not an authoritative audit log; its upstream omissions include ground items and some dynamic location changes.
 
-The schema permits 1–1,000 headless agents, 50–400 ms ticks, up to seven wall-clock days, and up to 100 GiB of run artifacts. These are configuration bounds, not demonstrated capacity. The engine's serial simulation remains a shared-world bottleneck. One lite process and one SDK executor per RuneBench character consume memory and CPU; 1,000 characters on this machine require measurement. External API throughput, spend, and crowded observations may limit useful progress before the engine does.
+The schema permits 1–2,046 headless agents, 50–400 ms ticks, up to seven wall-clock days, and up to 100 GiB of run artifacts. These are configuration bounds, not demonstrated capacity. The engine's serial simulation remains a shared-world bottleneck. One lite process and one SDK executor per RuneBench character consume memory and CPU; 1,000 characters on this machine require measurement. External API throughput, spend, and crowded observations may limit useful progress before the engine does.
 
 Existing SDK waits mix wall time and game ticks, and SDK worker state publication remains at its existing cadence. Acceleration must pass behavioral tests; a 50 ms setting alone is not evidence of 8× useful agent throughput. Trace quota checks still scan artifact files and event export still rereads prior JSONL, so long runs can become storage/CPU bound. Multi-day and 1,000-agent experiments remain unvalidated until these costs are measured and addressed if necessary.
 

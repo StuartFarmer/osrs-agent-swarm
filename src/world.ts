@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { createServer } from "node:net";
 import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { identifier, number } from "./config.ts";
+import { identifier, number, MAX_WORLD_PLAYERS } from "./config.ts";
 const exec = promisify(execFile);
 export const SDK_REVISION = "3aa493c3d26680df5bae2b475cc1805e3db05ae3";
 export type WorldHandle = {
@@ -29,8 +29,8 @@ export const worldEnv = {
   NODE_TICKRATE: "400",
   NODE_XPRATE: "1",
   WORLD_FEED: "true",
-  MAX_PLAYERS_PER_IP: "1000",
-  NODE_MAX_CONNECTED: "1000",
+  MAX_PLAYERS_PER_IP: String(MAX_WORLD_PLAYERS),
+  NODE_MAX_CONNECTED: String(MAX_WORLD_PLAYERS),
   WEB_PORT: "8888",
   WEB_MANAGEMENT_PORT: "8898",
   WEB_TRANSPORT_WORKER: "false",
