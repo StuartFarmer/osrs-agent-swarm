@@ -3,8 +3,19 @@ import { readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadExperiment, identifier } from "./config.ts";
-import { prepareWorld, startWorld, stopWorld, readWorld } from "./world.ts";
-import { startBrowser, attachBrowser, accountsFor } from "./browser.ts";
+import {
+  prepareWorld,
+  startWorld,
+  stopWorld,
+  readWorld,
+  worldStats,
+} from "./world.ts";
+import {
+  startBrowser,
+  attachBrowser,
+  accountsFor,
+  stopBrowser,
+} from "./browser.ts";
 import {
   startRun,
   readManifest,
@@ -16,9 +27,13 @@ import { validateMemory } from "./store.ts";
 import { Trace } from "./trace.ts";
 import { recordSession, verifyRecorder } from "./recording.ts";
 import { checkAcceptance } from "./acceptance.ts";
+import { startLite, stopLite } from "./lite.ts";
+import { startSpectator } from "./spectator.ts";
 const help = `RuneScape swarm POC (run from the repository root)
-  world create|start|stop WORLD_ID
-  clients start --experiment experiments/m1.json
+  world create|start|stop WORLD_ID [--tick-ms 50..400]
+  world stats
+  view --world WORLD_ID  (read-only map and spectator feed on localhost:6080)
+  clients start|stop --experiment experiments/m1.json
   run --experiment experiments/m1.json [--resume RUN_ID] [--record]
   record --run RUN_ID
   status --run RUN_ID
@@ -27,13 +42,15 @@ const help = `RuneScape swarm POC (run from the repository root)
   capture --run RUN_ID --agent AGENT_ID
   report --run RUN_ID
   help
-World and browser lifetimes are separate from the agent harness. Ctrl-C stops the harness.
+World and client lifetimes are separate from the agent harness. Ctrl-C stops the harness.
 `;
 async function main(): Promise<number> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
     options: {
       experiment: { type: "string" },
+      world: { type: "string" },
+      "tick-ms": { type: "string" },
       record: { type: "boolean", default: false },
       resume: { type: "string" },
       run: { type: "string" },
@@ -48,28 +65,68 @@ async function main(): Promise<number> {
     console.log(help);
     return 0;
   }
+  if (command === "view") {
+    const server = await startSpectator(
+      await readWorld(identifier(values.world)),
+    );
+    console.error(
+      "Read-only map: http://localhost:6080/mapview/; 3D viewer feed: ws://localhost:6080/worldfeed",
+    );
+    await new Promise<void>((resolve) => {
+      const stop = () => server.close(() => resolve());
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    });
+    return 0;
+  }
   if (command === "world") {
+    if (sub === "stats") {
+      print(await worldStats());
+      return 0;
+    }
     if (!id || !["create", "start", "stop"].includes(sub))
       throw new Error("Use world create|start|stop WORLD_ID");
     print(
       await (sub === "create"
         ? prepareWorld(id)
         : sub === "start"
-          ? startWorld(id)
+          ? startWorld(
+              id,
+              process.cwd(),
+              undefined,
+              values["tick-ms"] === undefined
+                ? undefined
+                : Number(values["tick-ms"]),
+            )
           : stopWorld(id)),
     );
     return 0;
   }
   if (command === "clients") {
-    if (sub !== "start" || !values.experiment)
-      throw new Error("Use clients start --experiment PATH");
+    if (!["start", "stop"].includes(sub) || !values.experiment)
+      throw new Error("Use clients start|stop --experiment PATH");
     const e = await loadExperiment(values.experiment),
       world = await readWorld(e.world.id);
-    const browser = await startBrowser(
-      world,
-      await accountsFor(world, e.agents),
-    );
-    await browser.close();
+    if (sub === "stop") {
+      if (e.clientMode === "headless") await stopLite(world);
+      else await stopBrowser(world);
+    } else {
+      const controller = new AbortController(),
+        stop = () => controller.abort();
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+      try {
+        const accounts = await accountsFor(world, e.agents);
+        const clients =
+          e.clientMode === "headless"
+            ? await startLite(world, accounts, controller.signal)
+            : await startBrowser(world, accounts);
+        await clients.close();
+      } finally {
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
+      }
+    }
     print({ worldId: world.id, clients: e.agents.length });
     return 0;
   }
@@ -96,6 +153,13 @@ async function main(): Promise<number> {
   if (!values.run) throw new Error("--run is required");
   const manifest = await readManifest(values.run),
     dir = runDirectory(values.run);
+  if (
+    ["record", "focus", "capture"].includes(command) &&
+    manifest.experiment.clientMode === "headless"
+  )
+    throw new Error(
+      "Headless runs have no game canvas; use view --world " + manifest.worldId,
+    );
   if (command === "report") {
     const acceptance = await checkAcceptance(dir);
     print({
@@ -202,7 +266,7 @@ async function main(): Promise<number> {
       )
         throw new Error("memory set requires --file and --expected-revision");
       const value = JSON.parse(await readFile(values.file, "utf8"));
-      validateMemory(value, manifest.experiment.limits.memoryBytes);
+      validateMemory(value);
       const m = store.updateMemory(
         key,
         Number(values["expected-revision"]),

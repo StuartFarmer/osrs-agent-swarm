@@ -1,22 +1,62 @@
 # RuneScape agent swarm
 
-A TypeScript POC for ten rendered RuneScape agents. Each agent has private SQLite memory and programmable observation/context functions. One shared Pi loop owns scheduling, model concurrency, tools, and tracing.
+A TypeScript POC for RuneScape agents in a private local game world. The default launch uses ten true headless clients; rendered clients remain available through the browser preset. The default experiment uses the RuneBench SDK baseline: agents execute TypeScript against the game SDK, search local SDK/wiki documentation, and keep private SQLite notes. One shared Pi loop owns scheduling, model concurrency, tools, and tracing.
 
-**Status: POC implementation with preliminary offline coverage; live milestone acceptance has not passed.** See [verification status](docs/reports/milestone-1.md) and the [runbook](docs/milestone-1.md).
+**Status: headless migration on `feat/headless-swarm`; live headless acceptance, 8× speed, and 1,000-agent capacity have not been validated.** See [verification status](docs/reports/milestone-1.md) and the [runbook](docs/milestone-1.md).
 
-Start reading here:
+## Run from the repository checkout
 
-- [Run the swarm in Docker](docs/container.md): server, ten rendered agents, browser viewing, and recording.
-- [Gatherer agent](agents/gatherer.ts): observation selection and context construction.
-- [Merchant agent](agents/merchant.ts): a different policy using the same runtime.
+The headless implementation is on `feat/headless-swarm` in the ordinary checkout; no worktree is needed. Run all commands from the repository root—the directory containing `compose.yaml`, `Dockerfile`, and `package.json`.
+
+You need Docker with Compose and an OpenRouter API key. In Docker Desktop, allocate at least **32 GiB of memory** to the Docker VM before starting. Docker installs Node, Bun, Chromium, FFmpeg, and the pinned RS-SDK; no host installation of those tools or submodule initialization is needed for this route.
+
+From the parent directory of your checkout:
+
+```sh
+cd osrs-bot-swarm
+git switch feat/headless-swarm
+export OPENROUTER_API_KEY='your-openrouter-api-key'
+docker compose up --build -d swarm
+docker compose logs -f swarm
+```
+
+The first build downloads dependencies, prepares the game world, and runs the image's checks. Keep the API key out of committed files. The configured experiment starts paid inference after all ten characters are ready: **30 minutes, four concurrent model requests, and a $5 ledger cap per run**. See [the inference runbook](docs/milestone-1.md#configure-inference) for accounting limits.
+
+Open **[the read-only map](http://localhost:6080/mapview/)** to see live player positions. The headless container starts the server, lite clients, and harness without Chromium, Xvfb, or recording. Traces and reports are written to `runs/`; saved worlds and client metadata live in the Compose `swarm-state` volume. The image still includes browser dependencies for the optional rendered preset. See [headless operation and calibration](HEADLESS.md). Name collection is optional: a fresh checkout uses synthetic names unless you supply a collected pool.
+
+```sh
+docker compose stop swarm  # Stop the harness, clients, and world.
+docker compose up -d swarm # Resume the same run with its original deadline and budget.
+```
+
+If the deadline has passed, restarting opens the viewer without starting more inference. To start a **new experiment**, follow the [fresh-run procedure](docs/container.md#start-the-30-minute-test); it deletes the saved world and characters. Existing local data from another checkout is not moved by a Git merge, and Compose uses a separate project by default when the checkout directory name changes.
+
+## Code and configuration
+
+- [Run the swarm in Docker](docs/container.md): headless launch, persistence, and optional rendered mode.
+- [Headless operation](HEADLESS.md): native commands, server calibration, timing, tracing, and limitations.
+- [Docker entry point](docker/entrypoint.sh) and [launcher](docker/run.ts): start and stop the container's world, desktop, clients, and experiment.
+- [CLI](src/cli.ts): operator commands, invoked as `npm run swarm -- …`.
+- [RuneBench agent](agents/runebench.ts): the default agent used by the paid preset.
+- [Agent profiles and prompts](agents/profiles/): per-agent configuration and instructions.
+- [Gatherer](agents/gatherer.ts) and [merchant](agents/merchant.ts): alternative observation/context policies.
 - [Shared runtime](src/runtime.ts): refreshes context after inference admission, including tool follow-ups.
-- [OpenRouter experiment](experiments/openrouter-m1.json): ten agents, DeepSeek Flash, and the authorized $5 ledger cap.
+- [Headless experiment](experiments/headless-m1.json): ten agents, 400 ms ticks, 30 minutes, four concurrent model requests, and $5 ledger cap.
+- [Rendered OpenRouter experiment](experiments/openrouter-m1.json): the browser/recording preset.
 - [Unconfigured template](experiments/m1.json): model configuration is intentionally null.
 
-The target environment is Node 24, Bun >=1.3.14, Pi 0.84.2, and the pinned upstream RS-SDK submodule. Python 3.10+ runs the resumable hiscores name collector; FFmpeg powers optional rotating game recordings (`run --record`). New characters receive randomized appearances. See the [runbook](docs/milestone-1.md) for collection and recording commands. Local saves, credentials, traces, screenshots, videos, and collected names are ignored by Git. The Lumbridge checkout remains reference material.
+## Native development
 
-The provider adapter supports OpenAI-compatible Chat Completions and explicit OpenRouter routing with price ceilings and disabled reasoning. Other APIs need an explicit adapter. Python transport, headless clients, replay, dashboards, and evolution are later milestones.
+For development outside Docker, use Node 24, Bun >=1.3.14, Python 3.10+, and FFmpeg/ffprobe if recording rendered clients. Initialize the pinned SDK and install dependencies from the repository root:
 
-With Docker Desktop running and `OPENROUTER_API_KEY` exported, run `docker compose up --build -d swarm`. Watch the agents at [localhost:6080](http://localhost:6080/vnc.html?autoconnect=true&resize=scale). The container runs the game, agent harness, Chromium clients, and FFmpeg recorder; videos and traces appear in `runs/`. See the [container guide](docs/container.md) for restart behavior and validation limits. Collect names with the Python script if needed; collection is independent of the swarm.
+```sh
+git submodule update --init --recursive vendor/rs-sdk
+npm ci
+bun install --cwd vendor/rs-sdk --frozen-lockfile
+```
 
-The paid preset now uses the [RuneBench SDK baseline](docs/runebench-baseline.md): TypeScript execution and searchable upstream wiki/docs, private notes, and no automatic full-world tableau. Existing tableau runs need the guide's separate-run procedure before restarting with the changed configuration.
+See the [native runbook](docs/milestone-1.md) for world creation, client startup, optional verification, and recording commands. Local saves, credentials, traces, screenshots, videos, and collected names are ignored by Git and are not included in a fresh checkout.
+
+The provider adapter supports OpenAI-compatible Chat Completions and explicit OpenRouter routing with price ceilings and disabled reasoning. Other APIs need an explicit adapter. Multiple-world orchestration, deterministic replay, dashboards, and evolution are deferred. The current launcher owns one world; upstream supports deploying additional worlds later.
+
+See the [RuneBench baseline guide](docs/runebench-baseline.md) for the default tools and context policy. Existing tableau runs need that guide's separate-run procedure before switching configuration.

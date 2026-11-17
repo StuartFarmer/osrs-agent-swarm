@@ -19,11 +19,10 @@ import type { AgentDefinition } from "./agent-definition.ts";
 import { createTools } from "./tools.ts";
 import { pendingView, inspectAction } from "./action-history.ts";
 import { usageCost } from "./inference.ts";
-import { fitConversation } from "../agents/runebench.ts";
 import type { Gate, Provider, Lease } from "./inference.ts";
 export type TaskResult = {
   taskId: string;
-  status: "completed" | "limited" | "failed" | "aborted";
+  status: "completed" | "failed" | "aborted";
   reason: string;
   requests: number;
   tools: number;
@@ -91,6 +90,45 @@ function contextUntilAborted(
     );
   });
 }
+
+export function restoreConversation(store: Store, key: AgentKey): Message[] {
+  const messages: Message[] = [];
+  const pending = new Map<string, string>();
+  const finishInterrupted = () => {
+    for (const [toolCallId, toolName] of pending)
+      messages.push({
+        role: "toolResult",
+        toolCallId,
+        toolName,
+        isError: true,
+        content: [{
+          type: "text",
+          text: "Execution interrupted before a result was recorded. Outcome unknown; inspect state before retrying.",
+        }],
+        timestamp: Date.now(),
+      });
+    pending.clear();
+  };
+  let after = 0;
+  for (;;) {
+    const events = store.events(key, after, 1000);
+    if (!events.length) break;
+    for (const event of events) {
+      if (event.type !== "message_end") continue;
+      const message = (event.data as unknown as { message: Message }).message;
+      if (message.role !== "toolResult") finishInterrupted();
+      if (message.role === "assistant") {
+        for (const part of message.content)
+          if (part.type === "toolCall") pending.set(part.id, part.name);
+      } else if (message.role === "toolResult") pending.delete(message.toolCallId);
+      messages.push(message);
+    }
+    after = events.at(-1)!.seq;
+  }
+  finishInterrupted();
+  return messages;
+}
+
 export async function runTask(
   d: TaskDeps,
   outer: AbortSignal,
@@ -98,10 +136,6 @@ export async function runTask(
   const taskId = randomUUID(),
     controller = new AbortController();
   const signal = AbortSignal.any([outer, controller.signal]);
-  const timer = setTimeout(
-    () => controller.abort(new Error("task deadline")),
-    d.limits.taskSeconds * 1000,
-  );
   let requests = 0,
     tools = 0,
     status: TaskResult["status"] = "completed",
@@ -141,10 +175,6 @@ export async function runTask(
       const requestId = randomUUID();
       try {
         signal.throwIfAborted();
-        if (requests >= d.limits.requests) {
-          status = "limited";
-          throw new Error("request limit");
-        }
         lease = await d.gate.acquire(
           d.key,
           requestId,
@@ -193,22 +223,16 @@ export async function runTask(
             })),
           }),
         );
-        if (d.definition.toolset === "sdk")
-          fitConversation(context, d.limits.contextBytes);
-        if (Buffer.byteLength(JSON.stringify(context)) > d.limits.contextBytes)
-          throw new Error("context byte limit");
         const options: SimpleStreamOptions = {
           signal,
           maxTokens: d.limits.outputTokens,
           maxRetries: 0,
-          timeoutMs: d.limits.taskSeconds * 1000,
         };
         await d.trace.context(d.key, requestId, {
           context,
           options: {
             maxTokens: options.maxTokens,
             maxRetries: 0,
-            timeoutMs: options.timeoutMs,
           },
           model: d.provider.model,
           providerSettings: d.provider.requestSettings,
@@ -257,8 +281,7 @@ export async function runTask(
         if (terminal) out.push(terminal);
         else out.end(final);
       } catch (e) {
-        if (status !== "limited")
-          status = signal.aborted ? "aborted" : "failed";
+        status = signal.aborted ? "aborted" : "failed";
         reason = e instanceof Error ? e.message : String(e);
         try {
           lease?.finish(dispatched ? null : 0);
@@ -281,22 +304,17 @@ export async function runTask(
     initialState: {
       model: d.provider.model,
       systemPrompt: rules,
+      messages: restoreConversation(d.store, d.key),
       tools: createTools(
         d.key,
         d.game,
         d.store,
         d.trace,
         d.definition,
-        d.limits.memoryBytes,
       ),
     },
     beforeToolCall: async () => {
       if (signal.aborted) return { block: true, reason: "task cancelled" };
-      if (tools >= d.limits.tools) {
-        status = "limited";
-        reason = "tool limit";
-        return { block: true, reason };
-      }
       tools++;
       return undefined;
     },
@@ -327,7 +345,7 @@ export async function runTask(
       }
     });
     await agent.prompt(
-      "Choose and execute a short money-making task. Update memory before finishing.",
+      "Continue pursuing your objective. Use the conversation and live state to choose your next actions. Update memory with useful findings.",
     );
     await agent.waitForIdle();
     if (fatal) throw fatal;
@@ -342,7 +360,6 @@ export async function runTask(
     status = signal.aborted ? "aborted" : "failed";
     reason = e instanceof Error ? e.message : String(e);
   } finally {
-    clearTimeout(timer);
     signal.removeEventListener("abort", abort);
   }
   reason = String(redact(reason, d.trace.secrets));

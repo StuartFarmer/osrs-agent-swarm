@@ -8,7 +8,7 @@ import { readManifest, runDirectory, verifyRuntime } from "../../src/run.ts";
 import { checkAcceptance } from "../../src/acceptance.ts";
 
 test(
-  "validate preserved evidence from an operated 30-minute ten-agent run",
+  "validate preserved evidence from an operated experiment",
   {
     skip:
       process.env.SWARM_LIVE_GAME !== "1" ||
@@ -23,7 +23,8 @@ test(
       manifest = await readManifest(id),
       dir = runDirectory(id);
     assert.ok(manifest.experiment.model, "explicit model/budget required");
-    assert.equal(manifest.experiment.agents.length, 10);
+    if (manifest.experiment.clientMode !== "headless")
+      assert.equal(manifest.experiment.agents.length, 10);
     const smoke = await readWorld(process.env.SWARM_SMOKE_WORLD ?? "m1smoke");
     await copyFile(
       join(smoke.dir, "social-smoke.json"),

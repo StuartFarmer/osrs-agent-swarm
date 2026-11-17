@@ -1,5 +1,7 @@
 # Milestone 1: ten editable, observable agents
 
+> Superseded execution limits (2026-11-17): per user direction, script/code/output/context/memory and per-task caps were removed. Conversations now persist across tasks and restarts. See [current behavior](../../runebench-baseline.md#context-and-execution). The original design below is retained as history.
+
 > Superseded by [the TypeScript POC specification](2026-11-16-typescript-poc.md). The user chose TypeScript for the POC after clarifying code-level observation/context customization; this Python-first document is historical.
 
 This is the self-contained milestone-1 specification distilled from the conversation. The user develops in Python and does not write TypeScript: Python is therefore the research and agent-development surface. This supersedes the earlier Pi-first/TypeScript harness decision and the Lumbridge-specific assumptions in `references/lumbridge-ai/docs/plans/2026-11-16-agent-economy-milestones.md`. Numerical defaults below are proposed engineering choices, not experimental findings.

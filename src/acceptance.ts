@@ -34,26 +34,48 @@ export async function checkAcceptance(runDir: string): Promise<{
 }> {
   const manifest = await readJson(join(runDir, "manifest.json")),
     report = await readJson(join(runDir, "report.json"));
+  const headless = manifest?.experiment?.clientMode === "headless";
   const agents = manifest?.experiment?.agents ?? [],
     checks: Record<string, boolean> = {
       liveRun: manifest?.mode === "live" && manifest?.revision === SDK_REVISION,
-      tenAgents: agents.length === 10,
-      twoDefinitions: new Set(agents.map((a: any) => a.definition)).size >= 2,
+      ...(headless
+        ? {
+            population: agents.length >= 1 && agents.length <= 1000,
+            engineTiming:
+              report?.worldTiming?.configuredTickMs ===
+                manifest?.experiment?.world?.tickMs &&
+              Number.isFinite(report?.worldTiming?.achievedSpeed) &&
+              report.worldTiming.achievedSpeed > 0,
+          }
+        : {
+            tenAgents: agents.length === 10,
+            twoDefinitions:
+              new Set(agents.map((a: any) => a.definition)).size >= 2,
+          }),
       fullDuration:
-        manifest?.experiment?.durationSeconds === 1800 &&
+        (headless
+          ? manifest?.experiment?.durationSeconds > 0
+          : manifest?.experiment?.durationSeconds === 1800) &&
         report?.status === "completed" &&
-        report?.elapsedSeconds >= 1800,
+        report?.elapsedSeconds >= manifest?.experiment?.durationSeconds,
       socialSmoke: false,
       policyIsolation: false,
-      screenshot: false,
-      profileEdit: false,
-      harnessResume: false,
-      tabRestored: false,
+      ...(!headless
+        ? {
+            screenshot: false,
+            profileEdit: false,
+            harnessResume: false,
+            tabRestored: false,
+          }
+        : {}),
     };
   const smoke = await readJson(join(runDir, "social-smoke.json"));
   checks.socialSmoke =
     smoke?.mode === "live" &&
     smoke?.revision === SDK_REVISION &&
+    (!headless ||
+      (smoke?.clientMode === "headless" &&
+        smoke?.tickMs === manifest?.experiment?.world?.tickMs)) &&
     [
       "publicChat",
       "dmIsolation",
@@ -110,14 +132,32 @@ export async function checkAcceptance(runDir: string): Promise<{
         e.data?.actor === "agent" &&
         e.data?.revision > 0,
     );
-    checks[prefix + "gameAction"] = events.some(
-      (e) =>
-        e.type === "action_outcome" &&
-        ["completed", "dispatched"].includes(e.data?.status) &&
-        events.some(
-          (i) => i.type === "action_intent" && i.actionId === e.actionId,
-        ),
-    );
+    if (headless && a.definition === "runebench") {
+      checks[prefix + "scriptExecution"] = events.some(
+        (e) =>
+          e.type === "script_result" &&
+          e.data?.ok === true &&
+          !!e.actionId &&
+          events.some(
+            (start) =>
+              start.type === "script_started" &&
+              start.actionId === e.actionId &&
+              start.seq < e.seq,
+          ),
+      );
+    } else
+      checks[prefix + "gameAction"] = events.some(
+        (e) =>
+          e.type === "action_outcome" &&
+          ["completed", "dispatched"].includes(e.data?.status) &&
+          events.some(
+            (i) => i.type === "action_intent" && i.actionId === e.actionId,
+          ),
+      );
+    if (headless)
+      checks[prefix + "initialState"] = events.some(
+        (e) => e.type === "initial_state",
+      );
     checks[prefix + "context"] = false;
     for (const e of events.filter(
       (e) => e.type === "request_prepared" && e.requestId,
@@ -142,33 +182,40 @@ export async function checkAcceptance(runDir: string): Promise<{
           checks[prefix + "context"] = true;
       } catch {}
     }
-    checks.profileEdit ||= events.some((e) => e.type === "profile_changed");
-    checks.harnessResume ||= events.some(
-      (e) => e.type === "harness_attached" && e.data?.resume === true,
-    );
-    checks.tabRestored ||= events.some(
-      (e) =>
-        e.type === "agent_unavailable" &&
-        events.some(
-          (later) => later.seq > e.seq && later.type === "task_started",
-        ),
-    );
-    for (const e of events.filter((e) => e.type === "screenshot")) {
-      try {
-        const b = await readFile(await contained(runDir, e.data.path));
-        if (
-          b
-            .subarray(0, 8)
-            .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-        )
-          checks.screenshot = true;
-      } catch {}
+    if (!headless) {
+      checks.profileEdit ||= events.some((e) => e.type === "profile_changed");
+      checks.harnessResume ||= events.some(
+        (e) => e.type === "harness_attached" && e.data?.resume === true,
+      );
+      checks.tabRestored ||= events.some(
+        (e) =>
+          e.type === "agent_unavailable" &&
+          events.some(
+            (later) => later.seq > e.seq && later.type === "task_started",
+          ),
+      );
+      for (const e of events.filter((e) => e.type === "screenshot")) {
+        try {
+          const b = await readFile(await contained(runDir, e.data.path));
+          if (
+            b
+              .subarray(0, 8)
+              .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+          )
+            checks.screenshot = true;
+        } catch {}
+      }
     }
   }
   const missing = Object.entries(checks)
     .filter(([, pass]) => !pass)
     .map(([name]) => name);
-  const result = { passed: missing.length === 0, checks, missing };
+  const result = {
+    profile: headless ? "headless" : "milestone-1",
+    passed: missing.length === 0,
+    checks,
+    missing,
+  };
   await writeJson(join(runDir, "acceptance.json"), result);
   return result;
 }

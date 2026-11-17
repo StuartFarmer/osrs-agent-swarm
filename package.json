@@ -10,7 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test:names": "python3 -m unittest discover -s scripts -p 'test_collect_hiscore_names.py'",
     "check": "npm run typecheck && npm test && npm run test:names",
-    "swarm": "node --import tsx src/cli.ts"
+    "swarm": "node --import tsx src/cli.ts",
+    "prepare:sdk": "node scripts/prepare-sdk.mjs",
+    "pretest": "npm run prepare:sdk",
+    "preswarm": "npm run prepare:sdk"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.2",

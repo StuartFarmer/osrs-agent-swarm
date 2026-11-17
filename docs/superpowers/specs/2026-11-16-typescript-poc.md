@@ -1,5 +1,7 @@
 # Ten-agent TypeScript POC
 
+> Superseded execution limits (2026-11-17): per user direction, script/code/output/context/memory and per-task caps were removed. Conversations now persist across tasks and restarts. See [current behavior](../../runebench-baseline.md#context-and-execution). The original design below is retained as history.
+
 Current decision: use TypeScript for the POC, with Pi and direct upstream RS-SDK integration. This supersedes the Python-first milestone specification and plan. The important customization requirement remains: agent implementations control observation selection/transformation and context construction; the shared runtime controls waking and execution. JSON/Markdown profiles are optional inputs, not the customization boundary.
 
 ## Scope

@@ -3,11 +3,8 @@ import assert from "node:assert/strict";
 import {
   readReference,
   searchReference,
-  boundedText,
-  boundedScriptResult,
 } from "../src/code-tools.ts";
-import { runebench, fitConversation } from "../agents/runebench.ts";
-import { validateMessages } from "../src/runtime.ts";
+import { runebench } from "../agents/runebench.ts";
 
 test("baseline reads and searches pinned SDK documentation without opening private files", async () => {
   assert.match(await readReference("sdk/API.md", 1, 80), /chopTree/);
@@ -22,16 +19,10 @@ test("baseline reads and searches pinned SDK documentation without opening priva
     "/etc/passwd",
   ])
     await assert.rejects(readReference(path, 1, 20));
-  assert.ok(Buffer.byteLength(boundedText("🦀".repeat(10000))) <= 8192);
-  const large: any = boundedScriptResult({
-    ok: true,
-    result: "x".repeat(1000000),
-    error: null,
-    world: null,
-  });
-  assert.equal(large.truncated, true);
-  assert.equal(large.ok, true);
-  assert.ok(Buffer.byteLength(JSON.stringify(large)) < 32768);
+  const page = await readReference("sdk/API.md", 1, 400);
+  assert.ok(Buffer.byteLength(page) > 8192);
+  assert.match(page, /400:/);
+
 });
 
 test("SDK baseline carries instructions and private notes, without injecting the raw tableau", async () => {
@@ -61,31 +52,4 @@ test("SDK baseline carries instructions and private notes, without injecting the
   assert.match(text, /Try fishing/);
   assert.match(text, /execute_code/);
   assert.doesNotMatch(text, /RAW_WORLD_SENTINEL|live-state/);
-});
-
-test("conversation bounds remove complete oldest exchanges, keeping the newest tool result paired", () => {
-  const messages: any[] = [
-    { role: "user", content: "instructions", timestamp: 1 },
-    { role: "user", content: "task", timestamp: 1 },
-  ];
-  for (const id of ["old", "new"]) {
-    messages.push({
-      role: "assistant",
-      content: [{ type: "toolCall", id, name: "execute_code", arguments: {} }],
-      timestamp: 1,
-    });
-    messages.push({
-      role: "toolResult",
-      toolCallId: id,
-      toolName: "execute_code",
-      content: [{ type: "text", text: id + "x".repeat(1800) }],
-      timestamp: 1,
-    });
-  }
-  const context: any = { systemPrompt: "rules", messages, tools: [] };
-  fitConversation(context, 3000);
-  validateMessages(context.messages);
-  assert.ok(Buffer.byteLength(JSON.stringify(context)) <= 3000);
-  assert.equal(context.messages[2].content[0].id, "new");
-  assert.throws(() => fitConversation(context, 100), /context byte limit/);
 });

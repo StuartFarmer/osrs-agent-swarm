@@ -4,9 +4,9 @@ import { resolve, join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createServer } from "node:net";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { identifier } from "./config.ts";
+import { identifier, number } from "./config.ts";
 const exec = promisify(execFile);
 export const SDK_REVISION = "3aa493c3d26680df5bae2b475cc1805e3db05ae3";
 export type WorldHandle = {
@@ -18,6 +18,7 @@ export type WorldHandle = {
   revision: string;
   tickMs: number;
   xpRate: number;
+  epoch?: string;
 };
 export type OwnedProcess = { pid: number; token: string; script: string };
 export const worldEnv = {
@@ -27,6 +28,9 @@ export const worldEnv = {
   EASY_STARTUP: "true",
   NODE_TICKRATE: "400",
   NODE_XPRATE: "1",
+  WORLD_FEED: "true",
+  MAX_PLAYERS_PER_IP: "1000",
+  NODE_MAX_CONNECTED: "1000",
   WEB_PORT: "8888",
   WEB_MANAGEMENT_PORT: "8898",
   WEB_TRANSPORT_WORKER: "false",
@@ -68,7 +72,9 @@ export async function readWorld(
     w.revision !== SDK_REVISION ||
     w.gameDir !== join(dir, "game") ||
     w.dir !== dir ||
-    w.tickMs !== 400 ||
+    !Number.isInteger(w.tickMs) ||
+    w.tickMs < 50 ||
+    w.tickMs > 400 ||
     w.xpRate !== 1 ||
     w.gameUrl !== "http://127.0.0.1:8888" ||
     w.gatewayUrl !== "ws://127.0.0.1:7780"
@@ -297,13 +303,14 @@ export async function spawnOwned(
   cwd: string,
   log: string,
   env: Record<string, string> = {},
+  inheritEnv = true,
 ): Promise<OwnedProcess> {
   const token = randomUUID(),
     fd = openSync(log, "a", 0o600);
   try {
     const child = spawn(script, [...args, "--swarm-owner=" + token], {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...(inheritEnv ? process.env : {}), ...env },
       detached: true,
       stdio: ["ignore", fd, fd],
     });
@@ -338,6 +345,7 @@ export async function startWorld(
   id: string,
   root = process.cwd(),
   signal?: AbortSignal,
+  tickMs?: number,
 ): Promise<WorldHandle> {
   signal?.throwIfAborted();
   const w = await readWorld(id, root),
@@ -349,12 +357,17 @@ export async function startWorld(
         "world has owned running processes; use status/stop before start",
       );
   }
+  if (tickMs !== undefined) {
+    number(tickMs, 50, 400, "tickMs");
+    w.tickMs = tickMs;
+  }
   await installGatewayReadiness(w.gameDir);
   await installPackingContext(w.gameDir);
   await Promise.all(
     [8888, 8898, 7780, 43594, 43500, 45099, 43501].map(portFree),
   );
   const processes: OwnedProcess[] = [];
+  w.epoch = randomUUID();
   try {
     for (const [sub, script] of [
       ["engine", "src/app.ts"],
@@ -366,7 +379,7 @@ export async function startWorld(
         [join(cwd, script)],
         cwd,
         join(w.dir, sub + ".log"),
-        worldEnv,
+        { ...worldEnv, NODE_TICKRATE: String(w.tickMs) },
       );
       processes.push(p);
       await writeJson(file, processes);
@@ -376,9 +389,16 @@ export async function startWorld(
       signal?.throwIfAborted();
       if (!(await Promise.all(processes.map(ownsProcess))).every(Boolean))
         throw new Error("world process exited; inspect local logs");
-      try {
-        if (await worldReady(w)) return w;
-      } catch {}
+      const ready = await worldReady(w).catch(() => false);
+      const stats = ready
+        ? await worldStats().catch(() => undefined)
+        : undefined;
+      if (stats) {
+        if (stats.tickRate !== w.tickMs)
+          throw new Error("effective world tick rate mismatch");
+        await writeJson(join(w.dir, "world.json"), w);
+        return w;
+      }
       await delay(500, undefined, { signal });
     }
     throw new Error("world preparation timeout");
@@ -401,4 +421,58 @@ export async function stopWorld(
   ) as OwnedProcess[];
   for (const p of [...processes].reverse())
     if (await ownsProcess(p)) await stopOwned(p);
+}
+
+export async function acquireWorldLock(
+  identity: string,
+): Promise<() => Promise<void>> {
+  const port =
+      30000 +
+      (parseInt(
+        createHash("sha256").update(identity).digest("hex").slice(0, 8),
+        16,
+      ) %
+        20000),
+    server = createServer((socket) => socket.end());
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", (e: NodeJS.ErrnoException) =>
+      reject(
+        e.code === "EADDRINUSE"
+          ? new Error("world is already owned or its lock port is in use")
+          : e,
+      ),
+    );
+    server.listen(port, "127.0.0.1", resolve);
+  });
+  return () =>
+    new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+}
+
+export async function worldStats(): Promise<{
+  tick: number;
+  tickRate: number;
+  players: number;
+  avg: Record<string, number>;
+  peak: Record<string, number>;
+  overBudget: number;
+  window: number;
+}> {
+  const response = await fetch("http://127.0.0.1:8898/tickstats", {
+    signal: AbortSignal.timeout(2000),
+  });
+  if (!response.ok) throw new Error("World timing endpoint unavailable");
+  const stats = (await response.json()) as any;
+  number(stats.tick, 0, Number.MAX_SAFE_INTEGER, "engine tick");
+  number(stats.tickRate, 50, 400, "effective tickMs");
+  return {
+    tick: stats.tick,
+    tickRate: stats.tickRate,
+    players: stats.players,
+    avg: stats.avg,
+    peak: stats.peak,
+    overBudget: stats.overBudget,
+    window: stats.window,
+  };
 }

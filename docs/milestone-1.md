@@ -1,18 +1,20 @@
 # Milestone 1 runbook
 
+> This is the rendered milestone runbook. For the default headless launch, use [headless operation](../HEADLESS.md) or [Docker](container.md).
+
 The goal is ten visible agents with independently programmable observations, memory, and context construction. The operator's three-character social smoke passed; the paid ten-agent milestone run is still pending. Do not treat the acceptance checker or skipped live tests as proof of a functioning swarm.
 
-For the containerized swarm, use the **[Docker run guide](container.md)**. The native installation commands below remain available for development. Docker includes the server, clients, harness, recorder, and a desktop you can view in your browser.
+For the containerized swarm, use the **[Docker run guide](container.md)**. The native installation commands below describe the rendered preset; Docker defaults to headless operation. Its optional rendered preset includes the recorder and desktop.
 
 ## Install and verify
 
 Use Node 24, Bun >=1.3.14, and Python 3.10+. Recording and its media tests also require FFmpeg (with libx264 and drawtext) and ffprobe on PATH; on macOS install these with `brew install ffmpeg`. From this checkout:
 
 ```sh
-rtk git submodule update --init --recursive vendor/rs-sdk
-rtk npm install
-rtk proxy sh -c 'cd vendor/rs-sdk && bun install --frozen-lockfile'
-rtk npm run check
+git submodule update --init --recursive vendor/rs-sdk
+npm ci
+bun install --cwd vendor/rs-sdk --frozen-lockfile
+npm run check
 ```
 
 The reviewed package lock is checked in and used by the container's `npm ci`. The submodule revision is 3aa493c3d26680df5bae2b475cc1805e3db05ae3. The compatibility test requires Node 24 and imports the actual SDK and Pi. Live runs reject the wrong Node/Pi versions.
@@ -22,9 +24,9 @@ Puppeteer downloads a browser during installation. To use an existing Chromium i
 ## Prepare a disposable local world
 
 ```sh
-rtk npm run swarm -- world create m1smoke
-rtk npm run swarm -- world start m1smoke
-rtk proxy env SWARM_LIVE_GAME=1 SWARM_SMOKE_WORLD=m1smoke node --import tsx --test tests/live/social.test.ts
+npm run swarm -- world create m1smoke
+npm run swarm -- world start m1smoke
+env SWARM_LIVE_GAME=1 SWARM_SMOKE_WORLD=m1smoke node --import tsx --test tests/live/social.test.ts
 ```
 
 Creation clones the pinned vendor checkout, installs frozen upstream dependencies, runs the SQLite migration and builds, and checks effective 400 ms / 1x XP settings. It refuses an existing world directory. Failed preparation leaves files for diagnosis; use a new world ID rather than deleting saves.
@@ -46,17 +48,17 @@ The smoke test creates three rendered characters, skips the tutorial, and checks
 Stop the smoke world and close its dedicated browser before starting another world on the same ports:
 
 ```sh
-rtk npm run swarm -- world stop m1smoke
-rtk npm run swarm -- world create m1
-rtk npm run swarm -- world start m1
-rtk npm run swarm -- clients start --experiment experiments/openrouter-m1.json
+npm run swarm -- world stop m1smoke
+npm run swarm -- world create m1
+npm run swarm -- world start m1
+npm run swarm -- clients start --experiment experiments/openrouter-m1.json
 ```
 
 The POC uses fixed loopback ports 8888, 8898, 7780, 43594, 43500, 45099, and 43501; run one world at a time. Each world has its own accounts, saves, logs, and browser profile under .local/worlds. The launcher sets `WEBSITE_REGISTRATION=false` so the local login server creates new accounts on first authenticated connection. New bot accounts share the password `admin`, which satisfies the local client's 1–20 character limit. Saved rosters retain their credentials; changing an existing account requires updating both `accounts.json` and its login database hash. Existing tabs reload if their stored credentials change. Browser connections are separate from SDK controllers. Focusing/capturing a tab does not log in a second client or steal control.
 
 ## Collect agent names
 
-Run the standard-library Python collector directly if more names are needed. The existing pool contains 3,998 unique names collected by the operator; it is already sufficient for the first ten agents. With no page limit the script traverses the discoverable skill and activity categories in the main Old School hiscores instance, following pagination to the end of each category:
+Name collection is optional; a fresh checkout uses synthetic names by default. The operator's previously collected pool is ignored by Git and is not included in your checkout. Run the standard-library Python collector if collected names are wanted. With no page limit the script traverses the discoverable skill and activity categories in the main Old School hiscores instance, following pagination to the end of each category:
 
 ```sh
 python3 scripts/collect_hiscore_names.py
@@ -71,7 +73,7 @@ This collects public display names, not login identities. Separate seasonal/iron
 
 ## Configure inference
 
-The selected preset is `experiments/openrouter-m1.json`: ten agents using OpenRouter, `deepseek/deepseek-v4.1-flash-1017`, and a **$5 maximum ledger budget** for the first test. Supply `OPENROUTER_API_KEY` in the process environment through your usual secret manager. It is currently absent; no paid request has been made. Never put the key in a checked-in file or agent context.
+The selected preset is `experiments/openrouter-m1.json`: ten agents using OpenRouter, `deepseek/deepseek-v4.1-flash-1017`, and a **$5 maximum ledger budget** per run. Supply your own `OPENROUTER_API_KEY` in the process environment through your usual secret manager. Never put the key in a checked-in file or agent context.
 
 The model identifier was checked against [OpenRouter's model metadata](https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash-1017/endpoints). The preset requests disabled reasoning, price-sorted routing, no provider fallbacks, and support for all request parameters. It caps input at $0.05 and output at $0.50 per million tokens and per-request fees at zero, using [OpenRouter's routing controls](https://openrouter.ai/docs/guides/routing/provider-selection). These are conservative accounting tariffs and routing ceilings, not a promise of one provider's exact billing rate. If no endpoint qualifies, the request fails; the harness does not relax the ceilings automatically.
 
@@ -83,7 +85,7 @@ For another endpoint, copy `experiments/m1.json` to an ignored local experiment,
 
 ## Operate a run
 
-For the first 30-minute recorded experiment after the social smoke, close the smoke world's dedicated Chrome window, then run the following from the `typescript-poc` checkout in zsh. `world create m1` is a one-time step; if that world already exists, keep it and skip creation.
+For the first 30-minute recorded experiment after the social smoke, close the smoke world's dedicated Chrome window, then run the following from the repository root on `main` in zsh. `world create m1` is a one-time step; if that world already exists, keep it and skip creation.
 
 ```sh
 nvm use 24
@@ -99,12 +101,12 @@ npm run swarm -- run --experiment experiments/openrouter-m1.json --record
 The hidden prompt keeps the key out of shell history; skip it if your environment already supplies the key. The experiment uses ten accounts, a 1,800-second duration after preparation, four concurrent model calls, and a $5 ledger cap. New accounts draw from the collected name pool and share the password `admin`. Look for `[run] RUN_ID` in the terminal; recordings and traces are saved under that run directory.
 
 ```sh
-rtk npm run swarm -- run --experiment experiments/openrouter-m1.json
-rtk npm run swarm -- status --run RUN_ID
-rtk npm run swarm -- memory get --run RUN_ID --agent agent1
-rtk npm run swarm -- memory set --run RUN_ID --agent agent1 --expected-revision 2 --file .local/memory.json
-rtk npm run swarm -- focus --run RUN_ID --agent agent1
-rtk npm run swarm -- capture --run RUN_ID --agent agent1
+npm run swarm -- run --experiment experiments/openrouter-m1.json
+npm run swarm -- status --run RUN_ID
+npm run swarm -- memory get --run RUN_ID --agent agent1
+npm run swarm -- memory set --run RUN_ID --agent agent1 --expected-revision 2 --file .local/memory.json
+npm run swarm -- focus --run RUN_ID --agent agent1
+npm run swarm -- capture --run RUN_ID --agent agent1
 ```
 
 The run ID is the new directory under runs/. All characters must become ready and finish preparation before the 30-minute clock starts. Initial skills, equipment, and inventories must match. Instruction/profile edits apply at the next task boundary; invalid edits retain the last valid revision and are logged.
@@ -112,27 +114,27 @@ The run ID is the new directory under runs/. All characters must become ready an
 Ctrl-C drains the harness and disconnects SDK controllers. It leaves the world and rendered clients open. Resume using the same experiment:
 
 ```sh
-rtk npm run swarm -- run --experiment experiments/openrouter-m1.json --resume RUN_ID
+npm run swarm -- run --experiment experiments/openrouter-m1.json --resume RUN_ID
 ```
 
 Resume retains the original deadline, memory, spending, and uncertain effects; downtime counts. It never reruns an unfinished action automatically. Report task totals include tasks completed before the restart. Module code edits require this harness restart. Only one harness may own a world's controllers. Ownership uses a loopback lock listener that the OS releases on process exit; a port conflict refuses the run.
 
 Closing a character tab records unavailability while other agents continue. Restore it using clients start with the same experiment. New state must arrive before another request/action can proceed.
 
-Each task gets at most 8 requests, 16 executed tools, and 120 seconds. Global inference concurrency is 4. Agents share the same tools and scheduling policy. A task starts with a fresh transcript while private memory and selected history persist.
+Tasks have no request-count, tool-count, or duration cap. Agents retain their complete journaled conversation and private memory across tasks and harness restarts. The browser preset keeps global inference concurrency at 4; the overall experiment duration and spending cap remain configured separately. SDK scripts have no default timeout; callers can set `timeoutSeconds` explicitly. See [the baseline guide](runebench-baseline.md#context-and-execution) for execution and provider limits.
 
 ## Record a rotating game video
 
 Start the run with recording enabled:
 
 ```sh
-rtk npm run swarm -- run --experiment experiments/openrouter-m1.json --record
+npm run swarm -- run --experiment experiments/openrouter-m1.json --record
 ```
 
 Or attach a recorder in another terminal after an existing run finishes character preparation:
 
 ```sh
-rtk npm run swarm -- record --run RUN_ID
+npm run swarm -- record --run RUN_ID
 ```
 
 The recorder focuses each existing game tab for 30 seconds, cycling through all ten for the experiment's remaining duration. Ten agents make a five-minute cycle, repeated six times over a full 30-minute run. All agents continue executing while their tabs are off-screen. Native recording captures the game canvas at a target 10 fps with agent/name/world labels and an elapsed video clock. Docker uses direct X11 desktop capture so recording does not depend on the game answering JavaScript requests; browser controls/login URLs and manual tab changes are visible. Docker switch timestamps are approximate wall-clock offsets from encoder launch, and labels reflect the scheduled tab. Each invocation creates:
@@ -208,10 +210,10 @@ SQLite is the recovery source. Concurrent CLI and harness exports serialize thro
 For the demo, edit instructions during the run, restart/resume the harness, and close/restore one tab. Capture a screenshot and inspect every agent's saved context. Then validate the preserved evidence:
 
 ```sh
-rtk proxy env SWARM_LIVE_GAME=1 SWARM_LIVE_LLM=1 SWARM_LIVE_RUN_ID=RUN_ID SWARM_SMOKE_WORLD=m1smoke node --import tsx --test tests/live/ten-agents.test.ts
-rtk npm run swarm -- report --run RUN_ID
+env SWARM_LIVE_GAME=1 SWARM_LIVE_LLM=1 SWARM_LIVE_RUN_ID=RUN_ID SWARM_SMOKE_WORLD=m1smoke node --import tsx --test tests/live/ten-agents.test.ts
+npm run swarm -- report --run RUN_ID
 ```
 
 The live acceptance test evaluates an already operated CLI run; it does not silently buy a new 30-minute run. Missing live flags or run ID causes a skip. Missing agent activity, memory updates, context files, policy proof, social smoke, screenshot, or interventions causes a named failure. Exit codes: 0 success, 1 setup/config error, 2 incomplete acceptance/run.
 
-The report does not claim profitability. Initial states and subsequent observations/tool results preserve evidence for later economic analysis. Full visual replay and headless viewing are deferred until the next milestone.
+The report does not claim profitability. Initial states and subsequent observations/tool results preserve evidence for later economic analysis. Full visual replay is deferred; the headless branch provides a read-only map and spectator feed described in [headless operation](../HEADLESS.md).

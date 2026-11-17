@@ -4,9 +4,16 @@ import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { localUrl } from "./config.ts";
-import { ownsProcess, spawnOwned, stopOwned, writeJson } from "./world.ts";
+import {
+  ownsProcess,
+  spawnOwned,
+  stopOwned,
+  writeJson,
+  acquireWorldLock,
+} from "./world.ts";
 import type { WorldHandle, OwnedProcess } from "./world.ts";
 import type { AgentEntry } from "./types.ts";
+import { readSessions } from "./lite.ts";
 import { allocateNames, hasCollectedNames } from "./names.ts";
 export type Account = {
   agentId: string;
@@ -233,7 +240,7 @@ export function gameCanvasFrame(label: string): string {
   context.fillText(label, 10, 26, Math.max(1, frame.width - 180));
   return frame.toDataURL("image/jpeg", 0.8);
 }
-export async function startBrowser(
+async function launchBrowser(
   world: WorldHandle,
   accounts: Account[],
 ): Promise<BrowserHandle> {
@@ -314,4 +321,36 @@ export function browserArguments(
       : []),
     "about:blank",
   ];
+}
+
+export async function startBrowser(
+  world: WorldHandle,
+  accounts: Account[],
+): Promise<BrowserHandle> {
+  const release = await acquireWorldLock("clients:" + world.dir);
+  try {
+    const lite = await readSessions(world);
+    if (
+      lite &&
+      (await Promise.all(Object.values(lite.processes).map(ownsProcess))).some(
+        Boolean,
+      )
+    )
+      throw new Error("Stop headless clients before starting rendered clients");
+    return await launchBrowser(world, accounts);
+  } finally {
+    await release();
+  }
+}
+
+export async function stopBrowser(world: WorldHandle): Promise<void> {
+  const release = await acquireWorldLock("clients:" + world.dir);
+  try {
+    const path = join(world.dir, "browser.json");
+    if (!existsSync(path)) return;
+    const metadata = JSON.parse(await readFile(path, "utf8"));
+    if (await ownsProcess(metadata.process)) await stopOwned(metadata.process);
+  } finally {
+    await release();
+  }
 }

@@ -40,7 +40,9 @@ test("code workers keep messages separate and kill a CPU loop on cancellation", 
     ),
     [{ agent: 0 }, { agent: 1 }],
   );
-  const spin = workers[0].call("spin", {}, AbortSignal.timeout(100), 5000);
+  const large = "x".repeat(100000);
+  assert.equal(await workers[1].call("echo", large, new AbortController().signal), large);
+  const spin = workers[0].call("spin", {}, AbortSignal.timeout(100));
   assert.equal(
     await workers[1].call(
       "echo",

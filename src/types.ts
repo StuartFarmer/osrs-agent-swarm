@@ -24,13 +24,8 @@ export type ModelConfig = {
   };
 };
 export type Limits = {
-  requests: number;
-  tools: number;
-  taskSeconds: number;
   outputTokens: number;
   freshnessMs: number;
-  contextBytes: number;
-  memoryBytes: number;
   artifactBytes: number;
 };
 export type AgentEntry = {
@@ -40,6 +35,7 @@ export type AgentEntry = {
   instructionsPath: string;
 };
 export type Experiment = {
+  clientMode?: "browser" | "headless";
   world: {
     id: string;
     gameUrl: string;
