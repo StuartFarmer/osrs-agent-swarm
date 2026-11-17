@@ -4,28 +4,38 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Swarm · 3D spectator</title>
+    <link rel="stylesheet" href="/viewer/swarm-theme/theme.css" />
     <style>
       * {
         box-sizing: border-box;
       }
       body {
         margin: 0;
-        background: #11161d;
-        color: #edf1f6;
+        background: #1e1a15;
+        color: #ff981f;
         font:
-          14px system-ui,
-          sans-serif;
+          16px/1.3 "OSRS Small",
+          ui-monospace,
+          monospace;
+        text-shadow: 1px 1px 0 black;
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
       }
       header {
-        padding: 12px 16px;
+        padding: 8px 12px;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 12px;
-        border-bottom: 1px solid #455264;
+        gap: 10px;
+        flex: none;
       }
       a {
-        color: #9cdbff;
+        color: #ff981f;
+        text-underline-offset: 3px;
+      }
+      a:hover {
+        color: #ffff00;
       }
       button,
       select {
@@ -33,14 +43,30 @@
         min-height: 36px;
         max-width: 100%;
       }
+      select {
+        color: #ff981f;
+        background: #3e3529;
+        border: 1px solid #5d5447;
+        border-radius: 0;
+        padding: 4px 8px;
+        text-shadow: 1px 1px 0 black;
+      }
+      select:disabled {
+        color: #9f9f9f;
+      }
+      .swarm-shell #follow {
+        margin-left: 0;
+        padding: 4px 10px;
+      }
       :focus-visible {
-        outline: 3px solid #9cdbff;
+        outline: 2px solid #ffff00;
         outline-offset: 2px;
       }
       main {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 360px;
-        height: calc(100dvh - 70px);
+        flex: 1;
+        min-height: 0;
       }
       iframe {
         width: 100%;
@@ -49,27 +75,37 @@
         background: #000;
       }
       aside {
-        padding: 16px;
+        padding: 12px;
         overflow-y: auto;
-        border-left: 1px solid #455264;
+        scrollbar-color: #786b55 #1e1a15;
       }
       h1 {
-        font-size: 16px;
+        font:
+          18px "OSRS Bold",
+          ui-monospace,
+          monospace;
+        color: #ffff00;
         margin: 0;
       }
       h2 {
-        font-size: 15px;
+        font:
+          18px "OSRS Bold",
+          ui-monospace,
+          monospace;
         margin: 18px 0 8px;
       }
       p {
         line-height: 1.45;
       }
       #status {
-        color: #ffd58a;
+        color: #ffff00;
+      }
+      #player {
+        color: #fff;
       }
       .hint {
-        color: #b7c4d4;
-        font-size: 12px;
+        color: #b8b0a3;
+        font-size: 16px;
       }
       ul {
         padding-left: 20px;
@@ -77,22 +113,33 @@
       li {
         margin-bottom: 5px;
         overflow-wrap: anywhere;
+        color: #fff;
       }
       pre {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         font:
-          12px/1.5 ui-monospace,
+          13px/1.5 ui-monospace,
           monospace;
+        color: #ddd5c5;
       }
       details {
-        border-top: 1px solid #455264;
+        border-top: 1px solid #5d5447;
         padding: 12px 0;
       }
       summary {
         cursor: pointer;
+        font-family: "OSRS Bold", ui-monospace, monospace;
+      }
+      summary:hover,
+      details[open] > summary {
+        color: #ffff00;
       }
       @media (max-width: 800px) {
+        body {
+          height: auto;
+          min-height: 100dvh;
+        }
         main {
           display: block;
           height: auto;
@@ -100,24 +147,26 @@
         iframe {
           height: 60dvh;
         }
-        aside {
-          border-left: 0;
-        }
       }
     </style>
   </head>
-  <body>
-    <header>
+  <body class="swarm-shell">
+    <header class="rs-border rs-background">
       <h1>Swarm spectator</h1>
       <label for="agent">Agent</label
       ><select id="agent" disabled></select>
-      <button id="follow" type="button" disabled>Follow selected agent</button>
+      <button id="follow" class="live-button" type="button" disabled>
+        Follow selected agent
+      </button>
       <a href="/mapview/">2D map</a>
       <a href="/viewer/" target="_blank" rel="noopener">Open 3D view</a>
     </header>
     <main>
       <iframe id="scene" src="/viewer/" title="Live 3D game world"></iframe>
-      <aside aria-label="Selected agent observation">
+      <aside
+        class="rs-border rs-background"
+        aria-label="Selected agent observation"
+      >
         <p id="connection" role="status">Loading 3D viewer…</p>
         <p class="hint">
           Pick an agent above, choose one in the 3D player list, or right-click

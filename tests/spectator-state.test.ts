@@ -83,6 +83,7 @@ test("3D asset serving contains decoded paths and symlinks inside the built view
   await mkdir(root);
   await writeFile(join(root, "index.html"), "3D app");
   await writeFile(join(root, "worker.js"), "self.onmessage = () => {};");
+  await writeFile(join(root, "font.ttf"), "font fixture");
   await writeFile(join(dir, "private.txt"), "outside");
   await symlink(join(dir, "private.txt"), join(root, "escape.txt"));
   assert.equal(
@@ -93,6 +94,7 @@ test("3D asset serving contains decoded paths and symlinks inside the built view
     (await viewerAsset(root, "/viewer/worker.js"))?.type,
     "application/javascript",
   );
+  assert.equal((await viewerAsset(root, "/viewer/font.ttf"))?.type, "font/ttf");
   for (const path of [
     "/viewer/../private.txt",
     "/viewer/%2e%2e/private.txt",

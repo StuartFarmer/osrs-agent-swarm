@@ -36,6 +36,25 @@ The map centers on the first player when positions arrive. Use the player select
 
 Only spectator/cache routes and the roster-scoped read-only observation API are exposed; game login, SDK control, and management endpoints stay private. Compose publishes only `127.0.0.1:6080`. The native viewer also binds loopback.
 
+## Shared UI styling and the actual client view
+
+The inspector shell reuses the pinned viewer's `OSRS Bold` / `OSRS Small` fonts, textured panel background, six-pixel border image, and button styles. `scripts/prepare-viewer.mjs` exports only those rules and their assets into `/viewer/swarm-theme/`; it excludes upstream body/layout and text-selection resets. Docker includes this automatically. Text remains selectable, long observations scroll, and the sidebar stacks below the scene on small screens.
+
+More reusable material is already in the pinned sources:
+
+- `references/rs-world/src/index.css` and `src/media/`: fonts, border and background images.
+- `references/rs-world/src/live/LivePanel.css`, `InfoPanel.css`, and `src/components/rs/`: panel, button, menu, searchable React selector, minimap, world map, and loading UI. `OsrsSelect.tsx` uses the viewer's existing `react-select` dependency; it cannot be imported directly into the shell's plain HTML without bundling it.
+- `vendor/rs-sdk/server/webclient/src/client/Client.ts`: loads `invback`, `chatback`, `mapback`, and `sideicons` from the packed media archive, and draws the real sidebar, chat and interfaces.
+- `vendor/rs-sdk/server/webclient/src/graphics/Pix8.ts`, `Pix32.ts`, `PixFont.ts`, and `src/config/IfType.ts`: decoders and drawing code for original sprites, bitmap fonts, and interface layouts. The original game's UI is drawn on canvas from cache assets; it is not a reusable CSS stylesheet. Use the same engine cache revision when exporting those assets.
+
+An exact client view is possible when the agent runs a **rendered browser client**: our existing rendered mode exposes that actual desktop/client through noVNC. It incurs rendering costs and the current browser preset is limited to ten agents. The present fleet is entirely lite clients; mixed rendered/headless sessions are not supported by our launcher.
+
+The lite client explicitly has no canvas and does not fetch models/textures. Its gateway observer sessions expose SDK state, not a complete rendered client. Logging a browser into the same character replaces its game connection, and the gateway disconnects the old bot session; the harness detects that loss. Do not use a second login as a spectator for a running headless agent.
+
+A future **passive client mirror** could reuse the original browser renderer without another game login, but it is not present in the pinned source. It would need a complete initial client state, subsequent packet/state updates, cache loading, and suppression of gameplay output. Joining only the incremental packet stream midway through a session is insufficient. It also needs local-only tab/camera interaction to inspect stats without changing the agent's actions. This is an engineering option, not a tested capability.
+
+The smaller option is to render original-looking stats/inventory/chat panels from the SDK observations already available, reusing cache sprites and interface definitions where practical. This preserves headless execution but remains an observer UI rather than an exact client-screen mirror.
+
 ## Grow the existing world to 25 agents
 
 After updating the source and rebuilding the image, select `experiments/headless-25.json` and a new run name. This preset uses 25 independent agents and up to 25 concurrent external model requests. It retains the 30-minute duration, 400 ms ticks, and $5 ledger cap. Agents 11–25 reuse the existing role/instruction templates; their characters, conversations, and private memory are independent.
