@@ -2,22 +2,27 @@
 
 The feature branch `feat/headless-swarm` runs one Bun lite client per character, using the pinned RS-SDK protocol client without a browser or renderer. One game world is shared by the agents. Upstream supports multiple worlds; deploying independent experiments can be added later without changing this client mode.
 
-The initial preset is `experiments/headless-m1.json`: ten RuneBench agents, normal 400 ms ticks, 30 minutes of wall time, four concurrent model requests, and a $5 ledger cap. Switching to headless does not itself accelerate game time. Setting 50 ms ticks requests 8× simulated time; actual speed must be measured. API latency and quotas do not accelerate with the engine.
+The recommended launcher is `./swarm`: 25 RuneBench agents, 25 concurrent external model requests, normal 400 ms ticks, 30 minutes of wall time, and a $5 ledger cap. The original ten-agent smoke preset remains available as `experiments/headless-m1.json`. Switching to headless does not itself accelerate game time. Setting 50 ms ticks requests 8× simulated time; actual speed must be measured. API latency and quotas do not accelerate with the engine.
 
 ## Ubuntu launch
 
-Use the ordinary repository checkout on `feat/headless-swarm`. [Docker instructions](docs/container.md) cover building and persistence. Start with a fresh Compose project to preserve any existing rendered experiment:
+From `~/osrs-bot-swarm-headless`:
 
 ```sh
-docker compose -p swarm-headless build swarm
-docker compose -p swarm-headless run --rm --service-ports swarm --view-only
+./swarm
 ```
 
-This starts the world, clients, and viewer without inference or character preparation. Stop it with Ctrl-C before a paid launch. From your laptop, forward the viewer:
+Docker builds the game, cache assets, and 3D viewer, then serves everything on port 6080. The launcher privately prompts for the API key when needed and uses sudo for Docker if required. No host Bun, Yarn, Node, cache conversion, or separate viewer process is needed. The native sections below are only for development outside Docker.
+
+Use `./swarm preview` for the world and viewer without inference, `./swarm logs` for startup/inference logs, and `./swarm stop` to save and stop. From your Mac, keep this tunnel running:
 
 ```sh
-ssh -L 6080:127.0.0.1:6080 user@concepcion
+ssh -N -L 16080:127.0.0.1:6080 user@concepcion
 ```
+
+Open **http://localhost:16080/watch/**. The same page shows the current world whether inference is active or stopped; the agent selector lists saved characters. Logs should say `opening 25 headless clients` and `Starting headless experiment` or `Resuming` for the 25-agent inference run. `View-only` means inference is disabled. Do not open a second tunnel if that port is already forwarded.
+
+The remaining local URLs below use server port 6080; use laptop port 16080 through the tunnel.
 
 Open <http://localhost:6080/watch/> for the **3D spectator and agent inspector**, or <http://localhost:6080/mapview/> for the 2D map. Docker bundles [RS World](https://github.com/MaxBittker/rs-world) pinned to `4b4df02829c0f31900535acae35a2707d265489c`, with cache assets converted from the same pinned engine build. Rendering runs in your browser; the game clients remain headless.
 
@@ -53,7 +58,9 @@ To grow further, copy the preset and add entries with unique agent IDs; profiles
 
 Account updates use a short exclusive `accounts.json.lock` file and an atomic roster replacement. If the process crashes during an update, stop all roster writers before removing that stale lock; do not delete `accounts.json` or character saves.
 
-## Native commands
+## Native commands (development without Docker)
+
+Skip this section for the Docker deployment.
 
 Install Node 24, Bun 1.3.14 or later, Python 3.10+, and the dependencies documented in the README. From the repository root:
 
@@ -153,7 +160,9 @@ To start a paid experiment later, export the model key and explicitly return to 
 sudo --preserve-env=OPENROUTER_API_KEY docker compose -p swarm-headless -f compose.yaml up -d --force-recreate swarm
 ```
 
-## Native 3D viewer build
+## Native 3D viewer build (development without Docker)
+
+**Skip this section when using Docker.** Docker already converts the cache and serves the viewer. Its world cache lives inside the saved-state volume, so the native host path below will not exist for a Docker-only deployment.
 
 Native `view` serves viewer assets from `.local/viewer`, or `SWARM_VIEWER_DIR` when set. To prepare them outside Docker, install Yarn Classic and run from the repository root after preparing world `m1`:
 

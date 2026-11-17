@@ -1,6 +1,6 @@
 # RuneScape agent swarm
 
-A TypeScript POC for RuneScape agents in a private local game world. The default launch uses ten true headless clients; rendered clients remain available through the browser preset. The default experiment uses the RuneBench SDK baseline: agents execute TypeScript against the game SDK, search local SDK/wiki documentation, and keep private SQLite notes. One shared Pi loop owns scheduling, model concurrency, tools, and tracing.
+A TypeScript POC for RuneScape agents in a private local game world. The `./swarm` launcher uses 25 true headless clients; rendered clients remain available through the browser preset. The default experiment uses the RuneBench SDK baseline: agents execute TypeScript against the game SDK, search local SDK/wiki documentation, and keep private SQLite notes. One shared Pi loop owns scheduling, model concurrency, tools, and tracing.
 
 **Status: headless migration on `feat/headless-swarm`; live headless acceptance, 8× speed, and 1,000-agent capacity have not been validated.** See [verification status](docs/reports/milestone-1.md) and the [runbook](docs/milestone-1.md).
 
@@ -10,38 +10,48 @@ The headless implementation is on `feat/headless-swarm` in the ordinary checkout
 
 You need Docker with Compose and an OpenRouter API key. In Docker Desktop, allocate at least **32 GiB of memory** to the Docker VM before starting. Docker installs Node, Bun, Chromium, FFmpeg, and the pinned RS-SDK; no host installation of those tools or submodule initialization is needed for this route.
 
-From the parent directory of your checkout:
+From the repository root:
 
 ```sh
-cd osrs-bot-swarm
-git switch feat/headless-swarm
-export OPENROUTER_API_KEY='your-openrouter-api-key'
-docker compose up --build -d swarm
-docker compose logs -f swarm
+./swarm
 ```
 
-The first build downloads dependencies, prepares the game world, and runs the image's checks. Keep the API key out of committed files. The configured experiment starts paid inference after all ten characters are ready: **30 minutes, four concurrent model requests, and a $5 ledger cap per run**. See [the inference runbook](docs/milestone-1.md#configure-inference) for accounting limits.
+The launcher prompts privately for an OpenRouter API key if it is not already exported, uses sudo when Docker needs it, builds the game and bundled 3D viewer, and starts the service. It reuses the `swarm-headless` saved world and the named `scale25` run. **25 agents, up to 25 concurrent model requests, 30 minutes, and a $5 ledger cap per run.** Existing character progress is retained. See [inference accounting limits](docs/milestone-1.md#configure-inference).
 
-Open **[the 3D spectator](http://localhost:6080/watch/)** to follow characters and inspect their published game state. The [2D map](http://localhost:6080/mapview/) is also available. The headless container starts the server, lite clients, and harness without Chromium, Xvfb, or recording. Traces and reports are written to `runs/`; saved worlds and client metadata live in the Compose `swarm-state` volume. The image still includes browser dependencies for the optional rendered preset. See [headless operation and calibration](HEADLESS.md), including [25 agents in the existing world](HEADLESS.md#grow-the-existing-world-to-25-agents). Name collection is optional: a fresh checkout uses synthetic names unless you supply a collected pool.
+On your Mac, leave this SSH tunnel running:
 
 ```sh
-docker compose stop swarm  # Stop the harness, clients, and world.
-docker compose up -d swarm # Resume the same run with its original deadline and budget.
+ssh -N -L 16080:127.0.0.1:6080 user@concepcion
 ```
 
-If the deadline has passed, restarting opens the viewer without starting more inference. To start a **new experiment**, follow the [fresh-run procedure](docs/container.md#start-the-30-minute-test); it deletes the saved world and characters. Existing local data from another checkout is not moved by a Git merge, and Compose uses a separate project by default when the checkout directory name changes.
+Open **http://localhost:16080/watch/** for the live 3D viewer and agent picker. The picker lists the saved roster; startup/inference status is in `./swarm logs`. The [2D map](http://localhost:16080/mapview/) remains available. If you run Docker on your own computer, open http://localhost:6080/watch/ directly.
+
+**Docker builds and serves the viewer. Do not run the native cache-conversion or viewer-build commands on the server host.** No host Bun, Node, Yarn, or viewer checkout is needed.
+
+```sh
+./swarm logs     # Follow startup and inference logs.
+./swarm stop     # Stop inference and save/stop the world.
+./swarm preview  # Start the same world and viewer without inference.
+./swarm         # Start/resume inference with the original deadline and ledger.
+```
+
+The viewer remains available when inference finishes. An expired run does not automatically restart its spending budget. Use a new explicit name, e.g. `SWARM_RUN_NAME=next-run ./swarm`, to start another run in the same saved world. A new run starts fresh agent conversations/private memory; previous traces remain in `runs/`. Override the preset with `SWARM_EXPERIMENT=experiments/YOUR_FILE.json`. Configuration must remain unchanged when resuming a run name.
+
+Saved worlds live in the Compose volume; traces live in `runs/`. Never delete the volume to update the image or grow the population. To update an ordinary Git checkout, run `git pull --ff-only` then `./swarm`. Deployments initially copied without `.git` need the source update procedure in [HEADLESS.md](HEADLESS.md#update-the-existing-preview-on-concepcion).
 
 ## Code and configuration
 
 - [Run the swarm in Docker](docs/container.md): headless launch, persistence, and optional rendered mode.
 - [Headless operation](HEADLESS.md): native commands, server calibration, timing, tracing, and limitations.
+- [One-command launcher](swarm): build, launch, logs, stop, and preview.
 - [Docker entry point](docker/entrypoint.sh) and [launcher](docker/run.ts): start and stop the container's world, desktop, clients, and experiment.
 - [CLI](src/cli.ts): operator commands, invoked as `npm run swarm -- …`.
 - [RuneBench agent](agents/runebench.ts): the default agent used by the paid preset.
 - [Agent profiles and prompts](agents/profiles/): per-agent configuration and instructions.
 - [Gatherer](agents/gatherer.ts) and [merchant](agents/merchant.ts): alternative observation/context policies.
 - [Shared runtime](src/runtime.ts): refreshes context after inference admission, including tool follow-ups.
-- [Headless experiment](experiments/headless-m1.json): ten agents, 400 ms ticks, 30 minutes, four concurrent model requests, and $5 ledger cap.
+- [25-agent experiment](experiments/headless-25.json): the launcher default; 25 concurrent requests, 400 ms ticks, 30 minutes, and $5 ledger cap.
+- [Ten-agent smoke preset](experiments/headless-m1.json): the original four-request baseline used by bare Compose.
 - [Rendered OpenRouter experiment](experiments/openrouter-m1.json): the browser/recording preset.
 - [Unconfigured template](experiments/m1.json): model configuration is intentionally null.
 

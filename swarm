@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+action=${1:-start}
+case "$action" in
+  start|preview|logs|stop) ;;
+  *) echo "Usage: ./swarm [start|preview|logs|stop]" >&2; exit 2 ;;
+esac
+if [[ $# -gt 1 ]]; then
+  echo "Usage: ./swarm [start|preview|logs|stop]" >&2
+  exit 2
+fi
+
+export SWARM_EXPERIMENT=${SWARM_EXPERIMENT:-experiments/headless-25.json}
+export SWARM_RUN_NAME=${SWARM_RUN_NAME:-scale25}
+if [[ "$action" == start && -z "${OPENROUTER_API_KEY:-}" ]]; then
+  if [[ ! -t 0 ]]; then
+    echo "Set OPENROUTER_API_KEY, or run ./swarm in a terminal for a hidden key prompt." >&2
+    exit 1
+  fi
+  read -r -s -p "OpenRouter API key: " OPENROUTER_API_KEY
+  echo
+  [[ -n "$OPENROUTER_API_KEY" ]] || { echo "API key is required." >&2; exit 1; }
+  export OPENROUTER_API_KEY
+fi
+
+docker_cmd=(docker)
+if ! docker info >/dev/null 2>&1; then
+  docker_cmd=(sudo --preserve-env=OPENROUTER_API_KEY,SWARM_EXPERIMENT,SWARM_RUN_NAME docker)
+fi
+compose=(-p swarm-headless -f compose.yaml)
+case "$action" in
+  logs) exec "${docker_cmd[@]}" compose "${compose[@]}" logs --tail 100 -f swarm ;;
+  stop) exec "${docker_cmd[@]}" compose "${compose[@]}" stop swarm ;;
+  preview) compose+=(-f compose.preview.yaml) ;;
+esac
+
+echo "Building the game and bundled 3D viewer; the current container stays up during the build."
+"${docker_cmd[@]}" compose "${compose[@]}" build swarm
+"${docker_cmd[@]}" compose "${compose[@]}" up -d --no-build swarm
+echo "Viewer (after startup): http://localhost:6080/watch/"
+echo "From your Mac: ssh -N -L 16080:127.0.0.1:6080 user@concepcion"
+echo "Then open: http://localhost:16080/watch/"
+echo "Startup and inference logs: ./swarm logs"

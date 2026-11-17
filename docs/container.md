@@ -2,7 +2,13 @@
 
 The default experiment uses true headless clients. Docker starts the game server, SDK gateway, Bun lite clients, and Pi harness, with a 3D spectator, agent inspector, and 2D map on port 6080. It does not launch Chromium, a desktop, or recording in this mode. The same image retains those dependencies for the optional rendered preset.
 
+## Recommended launch
+
+Run `./swarm` from the repository root. It builds and starts Docker with 25 agents, the 3D viewer, and inference; it prompts for the API key when needed. Use `./swarm logs`, `./swarm stop`, or `./swarm preview`. Docker handles all game/cache/viewer dependencies. From your Mac, keep `ssh -N -L 16080:127.0.0.1:6080 user@concepcion` running and open http://localhost:16080/watch/.
+
 ## Start the 30-minute test
+
+The commands below are the manual ten-agent smoke setup. Use the launcher above for the recommended 25-agent run.
 
 Run from the repository root on `feat/headless-swarm`. On Ubuntu, Docker with Compose is sufficient; native Node/Bun installations are not needed. Docker Desktop users should allocate at least 32 GiB to its VM. Compose currently caps container memory at 32 GiB; that is not a 1,000-client sizing recommendation.
 
