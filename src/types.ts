@@ -24,9 +24,8 @@ export type ModelConfig = {
   };
 };
 export type Limits = {
-  outputTokens: number;
   freshnessMs: number;
-  artifactBytes: number;
+  artifactBytes?: number;
 };
 export type AgentEntry = {
   id: string;
@@ -35,6 +34,7 @@ export type AgentEntry = {
   instructionsPath: string;
 };
 export type Experiment = {
+  permadeath?: boolean;
   clientMode?: "browser" | "headless";
   world: {
     id: string;
@@ -43,7 +43,7 @@ export type Experiment = {
     tickMs: number;
     xpRate: number;
   };
-  durationSeconds: number;
+  durationSeconds: number | null;
   preparationSeconds: number;
   concurrency: number;
   healthyDelayMs: number;

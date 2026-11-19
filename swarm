@@ -14,6 +14,7 @@ fi
 
 export SWARM_EXPERIMENT=${SWARM_EXPERIMENT:-experiments/headless-25.json}
 export SWARM_RUN_NAME=${SWARM_RUN_NAME:-scale25}
+export SWARM_VIEWER_PORT=${SWARM_VIEWER_PORT:-6080}
 if [[ "$action" == start && -z "${OPENROUTER_API_KEY:-}" ]]; then
   if [[ ! -t 0 ]]; then
     echo "Set OPENROUTER_API_KEY, or run ./swarm in a terminal for a hidden key prompt." >&2
@@ -27,9 +28,9 @@ fi
 
 docker_cmd=(docker)
 if ! docker info >/dev/null 2>&1; then
-  docker_cmd=(sudo --preserve-env=OPENROUTER_API_KEY,SWARM_EXPERIMENT,SWARM_RUN_NAME docker)
+  docker_cmd=(sudo --preserve-env=OPENROUTER_API_KEY,SWARM_EXPERIMENT,SWARM_RUN_NAME,SWARM_VIEWER_PORT docker)
 fi
-compose=(-p swarm-headless -f compose.yaml)
+compose=(-p "${COMPOSE_PROJECT_NAME:-swarm-headless}" -f compose.yaml)
 case "$action" in
   logs) exec "${docker_cmd[@]}" compose "${compose[@]}" logs --tail 100 -f swarm ;;
   stop) exec "${docker_cmd[@]}" compose "${compose[@]}" stop swarm ;;
@@ -39,7 +40,8 @@ esac
 echo "Building the game and bundled 3D viewer; the current container stays up during the build."
 "${docker_cmd[@]}" compose "${compose[@]}" build swarm
 "${docker_cmd[@]}" compose "${compose[@]}" up -d --no-build swarm
-echo "Viewer (after startup): http://localhost:6080/watch/"
-echo "From your Mac: ssh -N -L 16080:127.0.0.1:6080 user@concepcion"
+echo "Viewer (after startup): http://localhost:${SWARM_VIEWER_PORT}/watch/"
+echo "From your Mac: ssh -N -L 16080:127.0.0.1:${SWARM_VIEWER_PORT} user@concepcion"
 echo "Then open: http://localhost:16080/watch/"
+echo "Wealth over time: http://localhost:16080/wealth/"
 echo "Startup and inference logs: ./swarm logs"

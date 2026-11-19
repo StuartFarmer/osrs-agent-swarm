@@ -12,6 +12,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadExperiment } from "../src/config.ts";
 
+test("Concepción uses the async 25-agent preset with a fleet budget and uncapped artifacts", async () => {
+  const run = await loadExperiment("experiments/concepcion-async.json");
+  assert.deepEqual(
+    [run.clientMode, run.agents.length, run.concurrency, run.world.tickMs, run.durationSeconds, run.model?.costLimitUsd],
+    ["headless", 25, 25, 50, 7200, 5],
+  );
+  assert.equal(Object.hasOwn(run.limits, "artifactBytes"), false);
+  assert.equal(run.model?.contextWindow, 1_048_576);
+  assert.equal(Object.hasOwn(run.limits, "outputTokens"), false);
+});
+
 test("demo has ten independently configured agents and no implicit paid model", async () => {
   const e = await loadExperiment("experiments/m1.json");
   assert.equal(e.agents.length, 10);
@@ -26,7 +37,7 @@ test("old manifest limit fields remain readable without their former ceilings", 
   const dir = await mkdtemp(join(tmpdir(), "swarm-legacy-config-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const config = JSON.parse(await readFile("experiments/m1.json", "utf8"));
-  Object.assign(config.limits, { requests: 100, tools: 100, taskSeconds: 3600, contextBytes: 1000000, memoryBytes: 1000000 });
+  Object.assign(config.limits, { outputTokens: 1, requests: 100, tools: 100, taskSeconds: 3600, contextBytes: 1000000, memoryBytes: 1000000 });
   const file = join(dir, "experiment.json");
   await writeFile(file, JSON.stringify(config));
   assert.deepEqual((await loadExperiment(file)).limits, config.limits);

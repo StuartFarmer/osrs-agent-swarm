@@ -1,4 +1,6 @@
-import { mkdir, readFile, writeFile, rename, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, access, copyFile } from "node:fs/promises";
+import { installCharacterPatches, installObservationPatch } from "./world-patches.ts";
+import type { WealthSnapshot } from "./liquidation.ts";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { execFile, spawn } from "node:child_process";
@@ -19,6 +21,7 @@ export type WorldHandle = {
   tickMs: number;
   xpRate: number;
   epoch?: string;
+  observationVersion?: number;
 };
 export type OwnedProcess = { pid: number; token: string; script: string };
 export const worldEnv = {
@@ -89,6 +92,19 @@ export async function writeJson(path: string, value: unknown): Promise<void> {
     mode: 0o600,
   });
   await rename(temp, path);
+}
+export async function worldWealth(dir: string): Promise<WealthSnapshot> {
+  const token = JSON.parse(await readFile(join(dir, "wealth-token.json"), "utf8"));
+  const response = await fetch("http://127.0.0.1:8898/swarm-wealth", {
+    headers: { Authorization: "Bearer " + token },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) throw new Error("GE snapshot unavailable (HTTP " + response.status + ")");
+  const snapshot = await response.json() as WealthSnapshot;
+  if (!Number.isSafeInteger(snapshot.tick) || !snapshot.players ||
+      Object.values(snapshot.players).some(p => !Number.isSafeInteger(p.wealth) || p.wealth < 0))
+    throw new Error("Invalid GE snapshot");
+  return snapshot;
 }
 export function patchLoopback(source: string, expected: number): string {
   if (source.split("'0.0.0.0'").length - 1 !== expected)
@@ -228,6 +244,7 @@ export async function prepareWorld(
   const engine = join(gameDir, "server/engine");
   await command("bun", ["run", "sqlite:migrate"], engine);
   await command("bun", ["run", "build"], engine);
+  await installObservationPatch(gameDir);
   await command("bun", ["run", "build"], join(gameDir, "server/webclient"));
   const effective = JSON.parse(
     (
@@ -248,6 +265,7 @@ export async function prepareWorld(
     dir,
     gameDir,
     revision: pin,
+    observationVersion: 1,
     gameUrl: "http://127.0.0.1:8888",
     gatewayUrl: "ws://127.0.0.1:7780",
     tickMs: 400,
@@ -346,6 +364,7 @@ export async function startWorld(
   root = process.cwd(),
   signal?: AbortSignal,
   tickMs?: number,
+  permadeath = false,
 ): Promise<WorldHandle> {
   signal?.throwIfAborted();
   const w = await readWorld(id, root),
@@ -367,6 +386,27 @@ export async function startWorld(
     [8888, 8898, 7780, 43594, 43500, 45099, 43501].map(portFree),
   );
   const processes: OwnedProcess[] = [];
+  const web = join(w.gameDir, "server/engine/src/web");
+  for (const name of ["engine-wealth.mjs", "engine-deaths.mjs", "liquidation.ts"])
+    await copyFile(new URL("./" + name, import.meta.url), join(web, name));
+  await installCharacterPatches(w.gameDir);
+  if (!w.observationVersion) {
+    await installObservationPatch(w.gameDir);
+    await command("bun", ["run", "build"], join(w.gameDir, "server/webclient"));
+    w.observationVersion = 1;
+    await writeJson(join(w.dir, "world.json"), w);
+  }
+  const webEntry = join(web, "index.ts");
+  const source = await readFile(webEntry, "utf8");
+  const route = "            '/swarm-wealth': wealthResponse,";
+  if (!source.includes(route)) {
+    const anchor = "            '/tickstats':";
+    if (source.split(anchor).length !== 2) throw new Error("management route patch mismatch");
+    await writeFile(webEntry, 'import { wealthResponse } from "./engine-wealth.mjs";\n' +
+      source.replace(anchor, route + "\n" + anchor));
+  }
+  const wealthToken = randomUUID();
+  await writeJson(join(w.dir, "wealth-token.json"), wealthToken);
   w.epoch = randomUUID();
   try {
     for (const [sub, script] of [
@@ -379,7 +419,7 @@ export async function startWorld(
         [join(cwd, script)],
         cwd,
         join(w.dir, sub + ".log"),
-        { ...worldEnv, NODE_TICKRATE: String(w.tickMs) },
+        { ...worldEnv, NODE_TICKRATE: String(w.tickMs), ...(sub === "engine" ? { SWARM_WEALTH_TOKEN: wealthToken, SWARM_PERMADEATH: permadeath ? "1" : "0" } : {}) },
       );
       processes.push(p);
       await writeJson(file, processes);

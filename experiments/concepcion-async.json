@@ -1,0 +1,185 @@
+{
+  "clientMode": "headless",
+  "world": {
+    "id": "m1",
+    "gameUrl": "http://127.0.0.1:8888",
+    "gatewayUrl": "ws://127.0.0.1:7780",
+    "tickMs": 50,
+    "xpRate": 1
+  },
+  "durationSeconds": 7200,
+  "preparationSeconds": 300,
+  "concurrency": 25,
+  "healthyDelayMs": 1000,
+  "failureDelayMs": 5000,
+  "limits": {
+    "freshnessMs": 3000
+  },
+  "model": {
+    "provider": "openrouter",
+    "modelId": "deepseek/deepseek-v4.1-flash-1017",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "contextWindow": 1048576,
+    "costLimitUsd": 5,
+    "zeroCost": false,
+    "rates": {
+      "input": 0.05,
+      "output": 0.5,
+      "cacheRead": 0.05,
+      "cacheWrite": 0.05
+    }
+  },
+  "agents": [
+    {
+      "id": "agent1",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent1.json",
+      "instructionsPath": "agents/profiles/agent1.md"
+    },
+    {
+      "id": "agent2",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent2.json",
+      "instructionsPath": "agents/profiles/agent2.md"
+    },
+    {
+      "id": "agent3",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent3.json",
+      "instructionsPath": "agents/profiles/agent3.md"
+    },
+    {
+      "id": "agent4",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent4.json",
+      "instructionsPath": "agents/profiles/agent4.md"
+    },
+    {
+      "id": "agent5",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent5.json",
+      "instructionsPath": "agents/profiles/agent5.md"
+    },
+    {
+      "id": "agent6",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent6.json",
+      "instructionsPath": "agents/profiles/agent6.md"
+    },
+    {
+      "id": "agent7",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent7.json",
+      "instructionsPath": "agents/profiles/agent7.md"
+    },
+    {
+      "id": "agent8",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent8.json",
+      "instructionsPath": "agents/profiles/agent8.md"
+    },
+    {
+      "id": "agent9",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent9.json",
+      "instructionsPath": "agents/profiles/agent9.md"
+    },
+    {
+      "id": "agent10",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent10.json",
+      "instructionsPath": "agents/profiles/agent10.md"
+    },
+    {
+      "id": "agent11",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent1.json",
+      "instructionsPath": "agents/profiles/agent1.md"
+    },
+    {
+      "id": "agent12",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent2.json",
+      "instructionsPath": "agents/profiles/agent2.md"
+    },
+    {
+      "id": "agent13",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent3.json",
+      "instructionsPath": "agents/profiles/agent3.md"
+    },
+    {
+      "id": "agent14",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent4.json",
+      "instructionsPath": "agents/profiles/agent4.md"
+    },
+    {
+      "id": "agent15",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent5.json",
+      "instructionsPath": "agents/profiles/agent5.md"
+    },
+    {
+      "id": "agent16",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent6.json",
+      "instructionsPath": "agents/profiles/agent6.md"
+    },
+    {
+      "id": "agent17",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent7.json",
+      "instructionsPath": "agents/profiles/agent7.md"
+    },
+    {
+      "id": "agent18",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent8.json",
+      "instructionsPath": "agents/profiles/agent8.md"
+    },
+    {
+      "id": "agent19",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent9.json",
+      "instructionsPath": "agents/profiles/agent9.md"
+    },
+    {
+      "id": "agent20",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent10.json",
+      "instructionsPath": "agents/profiles/agent10.md"
+    },
+    {
+      "id": "agent21",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent1.json",
+      "instructionsPath": "agents/profiles/agent1.md"
+    },
+    {
+      "id": "agent22",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent2.json",
+      "instructionsPath": "agents/profiles/agent2.md"
+    },
+    {
+      "id": "agent23",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent3.json",
+      "instructionsPath": "agents/profiles/agent3.md"
+    },
+    {
+      "id": "agent24",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent4.json",
+      "instructionsPath": "agents/profiles/agent4.md"
+    },
+    {
+      "id": "agent25",
+      "definition": "runebench",
+      "profilePath": "agents/profiles/agent5.json",
+      "instructionsPath": "agents/profiles/agent5.md"
+    }
+  ]
+}

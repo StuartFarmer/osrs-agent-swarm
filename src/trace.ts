@@ -11,6 +11,7 @@ import {
   linkSync,
   unlinkSync,
   existsSync,
+  constants,
 } from "node:fs";
 import { resolve, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -48,12 +49,12 @@ export function redact(
 export class Trace {
   readonly runDir: string;
   readonly store: Store;
-  readonly maxBytes: number;
+  readonly maxBytes?: number;
   readonly secrets: readonly string[];
   constructor(
     runDir: string,
     store: Store,
-    maxBytes: number,
+    maxBytes?: number,
     secrets: readonly string[] = [],
   ) {
     this.runDir = resolve(runDir);
@@ -66,6 +67,7 @@ export class Trace {
       redact(event, this.secrets) as typeof event;
   }
   check(extra = 0): void {
+    if (this.maxBytes === undefined) return;
     if (
       !Number.isFinite(extra) ||
       extra < 0 ||
@@ -76,7 +78,12 @@ export class Trace {
   private dir(key: AgentKey): string {
     Object.values(key).forEach(identifier);
     this.check();
-    const dir = join(this.runDir, "agents", key.worldId, key.agentId);
+    let dir = this.runDir;
+    for (const part of ["", "agents", key.worldId, key.agentId]) {
+      dir = join(dir, part);
+      if (lstatSync(dir, { throwIfNoEntry: false })?.isSymbolicLink())
+        throw new Error("artifact symlink forbidden");
+    }
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.check();
     return dir;
@@ -86,7 +93,8 @@ export class Trace {
     data: string | Buffer,
     flag: "w" | "a" = "w",
   ): void {
-    const fd = openSync(path, flag, 0o600);
+    const fd = openSync(path, constants.O_NOFOLLOW | constants.O_WRONLY | constants.O_CREAT |
+      (flag === "a" ? constants.O_APPEND : constants.O_TRUNC), 0o600);
     try {
       if (flag === "a") appendFileSync(fd, data);
       else writeFileSync(fd, data);
@@ -100,6 +108,8 @@ export class Trace {
   }
   private flushLocked(key: AgentKey): void {
     const path = join(this.dir(key), "events.jsonl");
+    if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink())
+      throw new Error("artifact symlink forbidden");
     let last = 0;
     if (existsSync(path)) {
       const text = readFileSync(path, "utf8");

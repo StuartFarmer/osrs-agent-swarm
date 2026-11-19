@@ -23,8 +23,10 @@ RUN git init vendor/rs-sdk \
     && git -C vendor/rs-sdk checkout --detach FETCH_HEAD
 # The harness imports this checkout's SDK, separately from the prepared game copy.
 RUN bun install --cwd vendor/rs-sdk --frozen-lockfile
-COPY . .
-RUN node --import tsx docker/build-world.ts \
+COPY --chown=root:node . .
+# Release directories may be staged with a private umask. The in-image runtime needs read access.
+RUN chmod -R g+rX src agents docker experiments scripts package.json tsconfig.json \
+    && node --import tsx docker/build-world.ts \
     && npm run check \
     && chown -R node:node /opt/swarm-world /app/.local
 

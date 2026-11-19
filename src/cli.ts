@@ -22,6 +22,7 @@ import {
   runDirectory,
   acquireWorldLock,
 } from "./run.ts";
+import { rosterForResume } from "./evolution.ts";
 import { Store } from "./store.ts";
 import { validateMemory } from "./store.ts";
 import { Trace } from "./trace.ts";
@@ -30,10 +31,10 @@ import { checkAcceptance } from "./acceptance.ts";
 import { startLite, stopLite } from "./lite.ts";
 import { startSpectator } from "./spectator.ts";
 const help = `RuneScape swarm POC (run from the repository root)
-  world create|start|stop WORLD_ID [--tick-ms 50..400]
+  world create|start|stop WORLD_ID [--tick-ms 50..400] [--experiment PATH]
   world stats
   view --world WORLD_ID  (3D spectator, agent inspector and map on localhost:6080)
-  clients start|stop --experiment experiments/m1.json
+  clients start|stop --experiment experiments/m1.json [--resume RUN_ID]
   run --experiment experiments/m1.json [--resume RUN_ID] [--record]
   record --run RUN_ID
   status --run RUN_ID
@@ -97,6 +98,7 @@ async function main(): Promise<number> {
               values["tick-ms"] === undefined
                 ? undefined
                 : Number(values["tick-ms"]),
+              values.experiment ? (await loadExperiment(values.experiment)).permadeath : false,
             )
           : stopWorld(id)),
     );
@@ -116,10 +118,10 @@ async function main(): Promise<number> {
       process.once("SIGINT", stop);
       process.once("SIGTERM", stop);
       try {
-        const accounts = await accountsFor(world, e.agents);
+        const accounts = await accountsFor(world, rosterForResume(e, values.resume));
         const clients =
           e.clientMode === "headless"
-            ? await startLite(world, accounts, controller.signal)
+            ? await startLite(world, accounts, controller.signal, e.permadeath)
             : await startBrowser(world, accounts);
         await clients.close();
       } finally {
@@ -185,7 +187,8 @@ async function main(): Promise<number> {
         startedAt: manifest.startedAt,
         deadline: manifest.deadline,
         spendingUsd: store.spending(),
-        agents: manifest.experiment.agents.map((a) => {
+        openRouterBalance: store.keyBalance()?.value,
+        agents: rosterForResume(manifest.experiment, manifest.runId).map((a) => {
           const key = {
             runId: manifest.runId,
             worldId: manifest.worldId,
@@ -251,7 +254,8 @@ async function main(): Promise<number> {
       return 0;
     }
     const agentId = identifier(values.agent);
-    if (!manifest.experiment.agents.some((a) => a.id === agentId))
+    if (!rosterForResume(manifest.experiment, manifest.runId).some((a) => a.id === agentId) &&
+        !(manifest.experiment.permadeath && store.events({ runId: manifest.runId, worldId: manifest.worldId, agentId }, 0, 1).length))
       throw new Error("agent does not belong to this run");
     const key = { runId: manifest.runId, worldId: manifest.worldId, agentId };
     if (command === "memory") {

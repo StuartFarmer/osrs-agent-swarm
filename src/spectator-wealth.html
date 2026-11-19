@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  />
+  <title>Wealth scoreboard · Swarm spectator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font: 16px system-ui;
+      background: #151b19;
+      color: #efece2;
+    }
+    body {
+      max-width: 62rem;
+      margin: auto;
+      padding: 1.3rem;
+    }
+    nav {
+      display: flex;
+      gap: 1rem;
+    }
+    a {
+      color: #dbc38d;
+    }
+    h1 {
+      font:
+        2.3rem Georgia,
+        serif;
+      margin: 1.5rem 0 0.3rem;
+    }
+    p {
+      color: #becbc3;
+    }
+    section {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      flex-wrap: wrap;
+      padding: 1rem 0;
+    }
+    input {
+      flex: 1;
+      min-width: 7rem;
+      accent-color: #dbb866;
+    }
+    button {
+      padding: 0.4rem 0.8rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+    }
+    th,
+    td {
+      text-align: right;
+      padding: 0.55rem 0.3rem;
+      border-bottom: 1px solid #37413a;
+    }
+    th:nth-child(2),
+    td:nth-child(2) {
+      text-align: left;
+    }
+    th {
+      color: #d1bd91;
+    }
+    svg {
+      width: 7rem;
+      height: 1.7rem;
+      vertical-align: middle;
+    }
+    caption {
+      text-align: left;
+      padding: 0.7rem 0;
+      color: #c2cbc4;
+    }
+    @media (max-width: 36rem) {
+      body {
+        padding: 0.6rem;
+      }
+      svg {
+        width: 3.5rem;
+      }
+      th,
+      td {
+        font-size: 0.84rem;
+      }
+    }
+  </style>
+  <nav><a href="/watch/">3D spectator</a><a href="/mapview/">2D map</a></nav>
+  <h1>Wealth scoreboard</h1>
+  <p>
+    Total wealth in GP includes owned cash and the after-tax value of items
+    sellable into other players’ funded local GE bids.
+  </p>
+  <p id="billing" hidden></p>
+  <section>
+    <label for="history">Sample</label
+    ><input
+      id="history"
+      type="range"
+      min="0"
+      max="0"
+      value="0"
+      disabled
+    /><button id="latest" disabled>Latest</button>
+  </section>
+  <table>
+    <caption id="status" role="status">
+      Waiting for the first wealth sample…
+    </caption>
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Character</th>
+        <th>Total GP</th>
+        <th>Cash GP</th>
+        <th>History</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <script type="module">
+    const slider = document.querySelector("#history"),
+      latest = document.querySelector("#latest"),
+      status = document.querySelector("#status"),
+      body = document.querySelector("tbody");
+    const frames = [],
+      series = new Map();
+    let cursor = 0,
+      run = null,
+      following = true;
+    function add(row) {
+      let frame = frames.at(-1);
+      const key = row.frame ?? [row.tick, row.phase].join("/");
+      if (!frame || frame.key !== key || frame.rows.has(row.id)) {
+        frame = { key, time: row.time, tick: row.tick, rows: new Map() };
+        frames.push(frame);
+      }
+      frame.rows.set(row.id, row);
+      if (!series.has(row.id)) series.set(row.id, []);
+      series.get(row.id).push([frames.length - 1, row.wealth]);
+    }
+    function trend(id, end) {
+      const ns = "http://www.w3.org/2000/svg",
+        svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("viewBox", "0 0 100 24");
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", "Wealth through the selected sample");
+      const points = series.get(id).filter(([i]) => i <= end);
+      const peak = points.reduce((m, [, v]) => Math.max(m, v ?? 0), 1);
+      let d = "",
+        gap = true;
+      for (const [i, v] of points) {
+        if (v === null) {
+          gap = true;
+          continue;
+        }
+        const x = 1 + (98 * i) / Math.max(1, end),
+          y = 22 - (20 * v) / peak;
+        d += (gap ? "M" : "L") + x + " " + y + " ";
+        gap = false;
+      }
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", d);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "#dfbd72");
+      path.setAttribute("stroke-width", "2");
+      svg.append(path);
+      return svg;
+    }
+    function render() {
+      if (!frames.length) return;
+      slider.disabled = false;
+      slider.max = String(frames.length - 1);
+      if (following) slider.value = slider.max;
+      latest.disabled = following;
+      const end = Number(slider.value),
+        frame = frames[end];
+      status.textContent =
+        new Date(frame.time).toLocaleTimeString() +
+        " · Tick " +
+        (frame.tick ?? "unknown") +
+        " · Sample " +
+        (end + 1) +
+        " / " +
+        frames.length;
+      const rows = [...frame.rows.values()].sort(
+        (a, b) =>
+          Number(a.dead) - Number(b.dead) ||
+          (b.wealth ?? -1) - (a.wealth ?? -1) ||
+          a.id.localeCompare(b.id),
+      );
+      let place = 0,
+        rank = 0,
+        previous = null;
+      body.replaceChildren(
+        ...rows.map((r) => {
+          const tr = document.createElement("tr");
+          if (!r.dead && r.wealth !== null) {
+            place++;
+            if (previous !== r.wealth) rank = place;
+            previous = r.wealth;
+          }
+          for (const value of [
+            r.dead ? "Retired" : r.wealth === null ? "—" : rank,
+            r.name ?? r.id,
+            r.wealth?.toLocaleString() ?? "Unknown",
+            r.cash?.toLocaleString() ?? "Unknown",
+          ]) {
+            const td = tr.insertCell();
+            td.textContent = value;
+          }
+          tr.insertCell().append(trend(r.id, end));
+          return tr;
+        }),
+      );
+    }
+    slider.oninput = () => {
+      following = false;
+      render();
+    };
+    latest.onclick = () => {
+      following = true;
+      render();
+    };
+    async function update() {
+      let next = 5000;
+      try {
+        const response = await fetch("/spectator/wealth/" + cursor);
+        if (!response.ok) throw Error();
+        const page = await response.json();
+        const billing = document.querySelector("#billing");
+        billing.hidden = !page.billing;
+        if (page.billing) {
+          const { spentUsd, limitUsd, remainingUsd, checkedAt } = page.billing;
+          billing.textContent = `OpenRouter spend $${spentUsd.toFixed(6)} of $${limitUsd} · $${remainingUsd.toFixed(6)} remaining · Checked ${new Date(checkedAt).toLocaleTimeString()}`;
+        }
+        if (run !== page.runId) {
+          frames.length = 0;
+          series.clear();
+          body.replaceChildren();
+          following = true;
+          const reset = cursor !== 0;
+          cursor = 0;
+          run = page.runId;
+          if (reset) {
+            next = 0;
+            return;
+          }
+        }
+        for (const row of page.rows) {
+          add(row);
+          cursor = row.seq;
+        }
+        if (page.rows.length === 2000) next = 0;
+        render();
+      } catch {
+        status.textContent = "Wealth feed unavailable. Reconnecting…";
+      } finally {
+        setTimeout(update, next);
+      }
+    }
+    update();
+  </script>
+</html>

@@ -6,6 +6,16 @@ The recommended launcher is `./swarm`: 25 RuneBench agents, 25 concurrent extern
 
 ## Ubuntu launch
 
+Each inference run starts its own loopback `billion-context` process. Agents get
+`compress`, `decompress`, `search_context`, and `acp_status` alongside their game
+tools. The package rewrites the conversation before the model call. The journal
+retains the original messages, and saved folds live under
+`runs/<run-id>/billion-context/`. Resuming the same run restores each character’s
+folds. The transport accepts one upstream completion per budget reservation and
+rejects requests carrying an output-token limit before sending them to the provider.
+
+For the two-hour asynchronous experiment on Concepción, run `./swarm-concepcion` from its release directory. It starts 25 agents with 50 ms ticks, a shared $5 inference budget, and uncapped run artifacts. It uses its own Compose volume and viewer port 6081. Use `./swarm-concepcion logs` or `./swarm-concepcion stop` on the host. Forward the viewer with `ssh -N -L 16081:127.0.0.1:6081 user@concepcion` and open `http://localhost:16081/watch/`. The separate volume starts a fresh world on its first launch.
+
 From `~/osrs-bot-swarm-headless`:
 
 ```sh
@@ -35,6 +45,24 @@ The 3D scene uses the engine's world feed at `/worldfeed`; it cannot reconstruct
 The map centers on the first player when positions arrive. Use the player selector or **Center on player** to find a character; the status shows coordinates, level, total players, and how many share the selected tile. New characters often overlap on Tutorial Island, appearing as one yellow dot. Position updates preserve your camera position after the initial centering. Drag to pan and scroll to zoom. Connection failures are shown as stale-position warnings instead of silently presenting old markers as current. A `--view-only` launch leaves characters unprepared and does not run their AI.
 
 Only spectator/cache routes and the roster-scoped read-only observation API are exposed; game login, SDK control, and management endpoints stay private. Compose publishes only `127.0.0.1:6080`. The native viewer also binds loopback.
+
+### Permanent-death experiment
+
+On Concepción run `./swarm-concepcion-evolution` from this checkout to build and start 25 asynchronous agents in a fresh Compose volume. This preset uses 50 ms ticks, a shared $10 OpenRouter key budget and host port 6082. It has no wall-clock deadline. Use the same launcher with `logs`, `stop` or `preview`. On the observing machine open the tunnel:
+
+```sh
+ssh -N -L 16082:127.0.0.1:6082 user@concepcion
+```
+
+Create a dedicated inference key with a $10 credit limit and no reset. Supply the unused key at the hidden launcher prompt and keep it for resumes. Startup checks its lifetime limit and usage with OpenRouter. The logs, latest scoreboard balance, CLI status and final report use the spend returned by `GET /api/v1/key`. When OpenRouter rejects a request against this key’s limit, other agents can continue if their requests still fit. If every remaining agent receives that refusal, the report records `key_limit` and the actual unspent balance. A zero balance records `budget_exhausted`. Funding or infrastructure failures are recorded separately. [Create an OpenRouter key](https://openrouter.ai/settings/keys) · [OpenRouter key usage](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
+
+The [wealth scoreboard](http://localhost:16082/wealth/) ranks characters by current local net liquidation wealth. Drag **Sample** to inspect earlier rankings, including retired characters in their historical samples. **Latest** follows new samples. Cash includes refundable buy escrow and uncollected GP. Each character is valued independently against the same funded book. The [3D spectator](http://localhost:16082/watch/) and [map](http://localhost:16082/mapview/) share the tunnel. History is stored in the run's SQLite journal and remains available after inference ends.
+
+Each new character draws an unused name from the local collector or the bundled [3,998-name snapshot](src/hiscore-names.tsv), exported from 217 Old School Hiscores pages collected by [the repository collector](scripts/collect_hiscore_names.py). The snapshot contains normalized keys and public display names. The headless client samples enabled body kits for its chosen gender and valid colors on the character-design screen. The child's starting inventory, equipment and skills must match the founder baseline before its first decision.
+
+At a game-script death, the server records the account and tick, cancels its open GE orders and blocks further player input for that identity. The normal game script distributes dropped loot. Kept, banked and escrowed assets remain with the retired account. At each observation of the population, the harness chooses two distinct surviving parents, weighted by current local liquidation wealth. The second draw uses the remaining wealth. A zero-total draw is uniform. All deaths observed in one sample share one survivor pool. With fewer than two survivors, reproduction ends and the report records the reason.
+
+A newborn gets a fresh account, conversation, notes and workspace. It can inherit one saved routine and one explicitly saved general lesson per parent. Routine names are unique within the child library. A parent's private notes, plans and relationships stay with that parent. The birth journal records the slot, generation, replaced individual, selection tick, survivor wealth, conditional draw probabilities and source revisions. The endowment event records the body's observed starting assets. Parents continue playing while newborns complete character creation.
 
 ## Shared UI styling and the actual client view
 
@@ -203,3 +231,9 @@ SWARM_VIEWER_DIR="$PWD/references/rs-world/build" npm run swarm -- view --world 
 ```
 
 Use a clean checkout at the pinned revision; the bridge patch refuses unexpected source. The viewer's dependency scripts are disabled because its optional texture-export dependency is not required. Native builds can use the successful Node 24 toolchain; Docker uses the upstream viewer's Node 20 build environment and keeps those build dependencies out of the final image.
+
+## Economy results
+
+The RuneBench population pursues local net liquidation gain and can save, inspect and execute its own TypeScript skills. Run reports include `economy.agents[agentId].start`, `end` and `gain` in GP, plus the final wealth Gini. Headless runs journal intermediate observations as `local_ge_wealth`. The scorer reads bank, equipment, carried goods, recoverable items and GE claims at the engine tick. Each agent independently sells into available outside bids after local tax. Unsold quantities remain visible. This estimate assumes delivery to the local GE. NPC shop sales and direct trades contribute coins when they settle.
+
+New headless RuneBench runs also freeze a Wiki sell-price reference in `osrs-prices.json`. The report gives covered holdings value and unmatched item counts. A full external valuation requires matching item IDs and names for all holdings. Source outages are recorded, and the primary local score remains available. The OSRS snapshot is observer data. Private-GE prices and trade execution use the world's own orders.

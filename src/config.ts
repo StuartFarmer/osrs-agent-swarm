@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { resolve, relative, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
-import type { Experiment, Profile } from "./types.ts";
+import type { Experiment, AgentEntry, Profile } from "./types.ts";
 
 // The pinned engine allocates player slots 1 through 2046.
 export const MAX_WORLD_PLAYERS = 2046;
@@ -84,6 +84,7 @@ export async function loadExperiment(
   const e = object(
     input,
     [
+      ...(Object.hasOwn(input, "permadeath") ? ["permadeath"] : []),
       ...(Object.hasOwn(input, "clientMode") ? ["clientMode"] : []),
       "world",
       "durationSeconds",
@@ -113,18 +114,23 @@ export async function loadExperiment(
   localUrl(w.gatewayUrl, ["ws:"]);
   number(w.tickMs, headless ? 50 : 400, 400, "tickMs");
   number(w.xpRate, 1, 1, "xpRate");
-  number(e.durationSeconds, 1, headless ? 604800 : 1800, "durationSeconds");
+  if (e.durationSeconds === null) {
+    const model = e.model as Experiment["model"];
+    if (!headless || model?.provider !== "openrouter" || model.zeroCost !== false)
+      throw new Error("A budget-only run requires a paid headless OpenRouter experiment");
+  } else number(e.durationSeconds, 1, headless ? 604800 : 1800, "durationSeconds");
   number(e.preparationSeconds, 1, headless ? 3600 : 300, "preparationSeconds");
   number(e.concurrency, 1, headless ? MAX_WORLD_PLAYERS : 4, "concurrency");
   number(e.healthyDelayMs, 1000, 60000, "healthyDelayMs");
   number(e.failureDelayMs, 5000, 60000, "failureDelayMs");
   const maxima = {
-    outputTokens: Number.MAX_SAFE_INTEGER,
     freshnessMs: 3000,
-    artifactBytes: headless ? 107374182400 : 1073741824,
+    ...(e.limits && typeof e.limits === "object" && Object.hasOwn(e.limits, "artifactBytes")
+      ? { artifactBytes: headless ? 107374182400 : 1073741824 } : {}),
   };
   // Old run manifests retain these fields for resume hashes; they no longer constrain execution.
   const retired = [
+    "outputTokens",
     "requests",
     "tools",
     "taskSeconds",
@@ -214,6 +220,9 @@ export async function loadExperiment(
     await containedFile(root, a.profilePath);
     await containedFile(root, a.instructionsPath);
   }
+  if ("permadeath" in e && typeof e.permadeath !== "boolean") throw new Error("permadeath must be boolean");
+  if (e.permadeath && (!headless || e.agents.length < 3 || (e.agents as AgentEntry[]).some(a => a.definition !== "runebench")))
+    throw new Error("Permadeath requires at least three headless RuneBench founders");
   return e as unknown as Experiment;
 }
 export async function loadProfile(

@@ -81,6 +81,7 @@ export async function startLite(
   world: WorldHandle,
   accounts: Account[],
   signal?: AbortSignal,
+  reconcile = false,
 ) {
   const release = await acquireWorldLock("clients:" + world.dir);
   const created: OwnedProcess[] = [];
@@ -97,6 +98,16 @@ export async function startLite(
         );
     }
     let sessions = await readSessions(world);
+    if (sessions && reconcile) {
+      const ids = new Set(accounts.map(a => a.agentId));
+      for (const [id, process] of Object.entries(sessions.processes)) {
+        if (ids.has(id)) continue;
+        if (await ownsProcess(process)) await stopOwned(process);
+        delete sessions.processes[id];
+      }
+      sessions.roster = rosterHash(accounts);
+      await writeJson(join(world.dir, "lite.json"), sessions);
+    }
     if (sessions && sessions.roster !== rosterHash(accounts)) {
       if (
         (

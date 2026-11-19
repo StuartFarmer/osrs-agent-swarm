@@ -2,11 +2,13 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { Observation, Stamp } from "./game.ts";
 import type { Store } from "./store.ts";
 import type { AgentKey, JsonValue, MemoryRevision, Profile } from "./types.ts";
-export type Domain =
-  "position" | "inventory" | "chat" | "nearby" | "interfaces" | "bank" | "shop";
+import { formatObservation, type Domain } from "./observation.ts";
+import type { BotWorldState } from "../vendor/rs-sdk/sdk/types.ts";
+export type { Domain } from "./observation.ts";
 export type AgentView = {
   stamp: Stamp;
-  domains: Partial<Record<Domain, JsonValue>>;
+  domains: Domain[];
+  observation: string;
   derived: Record<string, JsonValue>;
 };
 export type ContextInput = {
@@ -27,30 +29,19 @@ export function json(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value ?? null));
 }
 export function domainView(o: Observation, domains: Domain[]): AgentView {
-  const r = o.raw;
-  const all: Record<Domain, JsonValue> = {
-    position: json({ player: r.player, skills: r.skills }),
-    inventory: json({ items: r.inventory, equipment: r.equipment }),
-    chat: json(r.gameMessages),
-    nearby: json({
-      players: r.nearbyPlayers,
-      npcs: r.nearbyNpcs,
-      objects: r.nearbyLocs,
-      groundItems: r.groundItems,
-    }),
-    interfaces: json({
-      dialog: r.dialog,
-      interface: r.interface,
-      trade: r.trade,
-    }),
-    bank: json({ current: r.bank, lastSeen: o.knownBank }),
-    shop: json(r.shop),
-  };
   return {
     stamp: o.stamp,
-    domains: Object.fromEntries(domains.map((d) => [d, all[d]])),
+    domains,
+    observation: formatObservation(o.raw as unknown as BotWorldState, domains, { nearbyLimit: Infinity, stamped: true }),
     derived: {},
   };
+}
+export function renderView(view: AgentView, stamped = true): string {
+  return [
+    view.observation,
+    stamped && "Action stamp: " + JSON.stringify(view.stamp),
+    Object.keys(view.derived).length > 0 && JSON.stringify(view.derived),
+  ].filter(Boolean).join("\n");
 }
 export function project(
   definition: AgentDefinition,
@@ -131,11 +122,10 @@ export function tableau(
       JSON.stringify({
         objective: input.objective,
         instructions: input.instructions,
-        observation: input.view,
         memory: input.memory.read(),
         ...extra,
       }) +
-      "\n</live-state>",
+      "\n" + renderView(input.view) + "\n</live-state>",
     timestamp: Date.now(),
   };
 }

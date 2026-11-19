@@ -8,7 +8,7 @@ import type { Store } from "./store.ts";
 import { validateMemory } from "./store.ts";
 import type { Trace } from "./trace.ts";
 import type { AgentKey } from "./types.ts";
-import { project, historyFor, json } from "./agent-definition.ts";
+import { project, renderView, historyFor, json } from "./agent-definition.ts";
 import type { AgentDefinition } from "./agent-definition.ts";
 import { actionIntent, pendingView, inspectAction } from "./action-history.ts";
 import { createCodeTools } from "./code-tools.ts";
@@ -94,7 +94,7 @@ const actions: Record<
   interact_loc: {
     fields: { target, option: int(1, 5) },
     description:
-      "Use an object option published in the observation; include its level.",
+      "Use an object option published in the observation; omitted level means ground floor (0).",
   },
   choose_dialog: {
     fields: { pageId: text(200), option: int(0, 10) },
@@ -142,6 +142,7 @@ export function createTools(
   store: Store,
   trace: Trace,
   definition: AgentDefinition,
+  permadeath = false,
 ): AgentTool[] {
   function tool(
     name: string,
@@ -162,7 +163,7 @@ export function createTools(
           signal ?? new AbortController().signal,
         );
         return {
-          content: [{ type: "text", text: JSON.stringify(value) }],
+          content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }],
           details: {},
         };
       },
@@ -195,7 +196,7 @@ export function createTools(
       "get_state",
       "Read fresh observations allowed by your observation policy.",
       obj({}),
-      async () => project(definition, game.observe()),
+      async () => renderView(project(definition, game.observe())),
     ),
     tool(
       "read_memory",
@@ -223,7 +224,7 @@ export function createTools(
   ];
   if (definition.toolset === "sdk")
     return [
-      ...createCodeTools(key, game, store, trace),
+      ...createCodeTools(key, game, store, trace, permadeath),
       ...read.filter(
         (t) => t.name === "read_memory" || t.name === "update_memory",
       ),
@@ -242,11 +243,7 @@ export function createTools(
         store.endAction(key, id, outcome);
         await trace.flush(key);
         // The SDK's free-form messages/evidence may contain observations from excluded domains.
-        return {
-          actionId: id,
-          status: outcome.status,
-          observation: project(definition, game.observe()),
-        };
+        return JSON.stringify({ actionId: id, status: outcome.status }) + "\n" + renderView(project(definition, game.observe()));
       }),
     ),
   ];

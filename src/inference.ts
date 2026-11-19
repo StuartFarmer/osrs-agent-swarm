@@ -19,7 +19,9 @@ export class Gate {
   private queue: Waiter[] = [];
   readonly capacity: number;
   readonly store: Store;
-  constructor(capacity: number, store: Store) {
+  private readonly providerEnforcesBudget: boolean;
+  constructor(capacity: number, store: Store, providerEnforcesBudget = false) {
+    this.providerEnforcesBudget = providerEnforcesBudget;
     if (!Number.isInteger(capacity) || capacity < 1)
       throw new Error("invalid concurrency");
     this.capacity = capacity;
@@ -66,7 +68,7 @@ export class Gate {
         continue;
       }
       try {
-        this.store.reserve(w.key, w.id, w.upper, w.cap);
+        if (!this.providerEnforcesBudget) this.store.reserve(w.key, w.id, w.upper, w.cap);
       } catch (e) {
         w.reject(e);
         continue;
@@ -78,7 +80,7 @@ export class Gate {
           if (finished) return;
           finished = true;
           try {
-            this.store.settle(w.id, actual);
+            if (!this.providerEnforcesBudget) this.store.settle(w.id, actual);
           } finally {
             this.active--;
             this.drain();
@@ -106,10 +108,7 @@ export function usageCost(
   if (fields.every((k) => usage[k] === 0)) return null;
   return fields.reduce((n, k) => n + (usage[k] * rates[k]) / 1000000, 0);
 }
-export function createProvider(
-  config: ModelConfig,
-  outputTokens = 2048,
-): Provider {
+export function createProvider(config: ModelConfig): Provider {
   if (!["openai-compatible", "openrouter"].includes(config.provider))
     throw new Error(
       "POC supports openai-compatible or openrouter Chat Completions",
@@ -134,7 +133,7 @@ export function createProvider(
     input: ["text"],
     cost: config.rates,
     contextWindow: config.contextWindow,
-    maxTokens: outputTokens,
+    maxTokens: config.contextWindow,
     compat: {
       maxTokensField: "max_tokens",
       supportsStore: false,
@@ -164,18 +163,12 @@ export function createProvider(
     model,
     requestSettings,
     capUsd: config.costLimitUsd,
-    upperUsd:
-      (config.contextWindow *
-        Math.max(
-          config.rates.input,
-          config.rates.cacheRead,
-          config.rates.cacheWrite,
-        ) +
-        outputTokens * config.rates.output) /
-      1000000,
+    // Input and completion share the context window. Reserve at the highest tariff.
+    upperUsd: config.contextWindow * Math.max(...Object.values(config.rates)) / 1_000_000,
     stream: (m, c, o) =>
-      api.streamSimple(m, c, {
+      api.stream(m, c, {
         ...o,
+        maxTokens: undefined,
         apiKey,
         maxRetries: 0,
         ...(requestSettings

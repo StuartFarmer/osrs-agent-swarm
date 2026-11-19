@@ -52,8 +52,9 @@ export async function checkAcceptance(runDir: string): Promise<{
             twoDefinitions:
               new Set(agents.map((a: any) => a.definition)).size >= 2,
           }),
-      fullDuration:
-        (headless
+      fullDuration: headless && manifest?.experiment?.durationSeconds === null
+        ? report?.status === "completed" && ["budget_exhausted", "key_limit"].includes(report?.stopReason)
+        : (headless
           ? manifest?.experiment?.durationSeconds > 0
           : manifest?.experiment?.durationSeconds === 1800) &&
         report?.status === "completed" &&
