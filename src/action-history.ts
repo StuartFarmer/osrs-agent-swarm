@@ -71,11 +71,11 @@ function safeIntent(
     for (const field of fields)
       if (field in action) result[field] = json((action as any)[field]);
   };
-  if (domains.chat !== undefined) copy(["text", "targetName"]);
-  if (domains.position !== undefined) copy(["x", "z"]);
-  if (domains.nearby !== undefined)
+  if (domains.includes("chat")) copy(["text", "targetName"]);
+  if (domains.includes("position")) copy(["x", "z"]);
+  if (domains.includes("nearby"))
     copy(["player", "target", "option", "skill", "durationSeconds"]);
-  if (domains.interfaces !== undefined)
+  if (domains.includes("interfaces"))
     copy(["partner", "screen", "give", "receive", "pageId"]);
   const itemDomain =
     action.kind === "bank_withdraw"
@@ -83,7 +83,7 @@ function safeIntent(
       : action.kind === "shop_buy"
         ? "shop"
         : "inventory";
-  if (domains[itemDomain] !== undefined) copy(["item", "count"]);
+  if (domains.includes(itemDomain)) copy(["item", "count"]);
   return result;
 }
 function observedEffect(intent: Intent, s: RawState): boolean {

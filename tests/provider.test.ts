@@ -39,15 +39,17 @@ test("OpenRouter dispatch enforces price caps, disabled reasoning and no fallbac
     };
     const stream = await provider.stream(
       provider.model,
-      { messages: [{ role: "user", content: "hello", timestamp: 1 }] },
-      { maxTokens: 2048, fetch: fakeFetch },
+      { messages: [{ role: "user", content: "x".repeat(250_000), timestamp: 1 }] },
+      { maxTokens: 1, fetch: fakeFetch },
     );
     for await (const _event of stream) {
     }
     const result = await stream.result();
     assert.equal(result.stopReason, "stop", result.errorMessage);
     assert.equal(calls, 1);
-    assert.equal(body.max_tokens, 2048);
+    assert.equal(Object.hasOwn(body, "max_tokens"), false);
+    assert.equal(Object.hasOwn(body, "max_completion_tokens"), false);
+    assert.equal(provider.upperUsd, 65536 * 0.5 / 1_000_000);
     assert.deepEqual(body.reasoning, { enabled: false });
     assert.equal(body.provider.allow_fallbacks, false);
     assert.equal(body.provider.require_parameters, true);

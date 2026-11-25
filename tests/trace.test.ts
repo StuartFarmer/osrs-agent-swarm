@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, appendFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, appendFile, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Store } from "../src/store.ts";
@@ -48,6 +48,18 @@ test("quota counts SQLite and blocks new journaled work", async (t) => {
   await assert.rejects(trace.context(key, "r", {}), /quota/);
   assert.throws(() => s.beginAction(key, "effect", { kind: "say" }), /quota/);
   assert.equal(s.pendingActions(key).length, 0);
+});
+test("uncapped traces permit writes and still reject redirected exports", async (t) => {
+  const { dir, s } = await setup(t);
+  const trace = new Trace(dir, s);
+  trace.check(2 ** 34);
+  s.append(key, { type: "sample", data: {} });
+  await trace.context(key, "req1", {});
+  const outside = join(dir, "outside");
+  await writeFile(outside, "untouched");
+  await symlink(outside, join(dir, "agents/w/a/events.jsonl"));
+  await assert.rejects(trace.flush(key), /symlink/);
+  assert.equal(await readFile(outside, "utf8"), "untouched");
 });
 test("credentials are redacted in the SQLite recovery journal as well as exported files", async (t) => {
   const { dir, s } = await setup(t);

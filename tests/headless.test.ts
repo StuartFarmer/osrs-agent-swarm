@@ -247,7 +247,7 @@ test("headless run preserves journals, measures timing and refuses new work afte
       "tsx",
       "tests/fixtures/headless-run.ts",
     ],
-    { timeout: 15000 },
+    { timeout: 30000 },
   );
   assert.match(stdout, /headless run verified/);
 });

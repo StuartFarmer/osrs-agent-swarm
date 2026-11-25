@@ -1,5 +1,24 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { readFileSync } from "node:fs";
+
+// The bundled snapshot contains only public display names and their normalized keys.
+export function initializeBundledNames(path: string): void {
+  const db = new DatabaseSync(path);
+  try {
+    db.exec("CREATE TABLE IF NOT EXISTS names(name_key TEXT PRIMARY KEY, display_name TEXT NOT NULL); BEGIN IMMEDIATE");
+    if (!db.prepare("SELECT 1 FROM names LIMIT 1").get()) {
+      const insert = db.prepare("INSERT INTO names VALUES(?,?)");
+      const names = readFileSync(new URL("./hiscore-names.tsv", import.meta.url), "utf8").trimEnd();
+      for (const row of names.split("\n")) {
+        const [key, display] = row.split("\t");
+        insert.run(key, display);
+      }
+    }
+    db.exec("COMMIT");
+  } finally { db.close(); }
+}
+
 export function hasCollectedNames(path: string): boolean {
   const db = new DatabaseSync(path, { readOnly: true });
   try {

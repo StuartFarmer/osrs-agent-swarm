@@ -1,3 +1,8 @@
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { startBillionContext } from "../src/billion-context.ts";
+import { createProvider } from "../src/inference.ts";
+import { json } from "../src/agent-definition.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
@@ -11,6 +16,7 @@ import type {
   Api,
 } from "@earendil-works/pi-ai";
 import { Store } from "../src/store.ts";
+import { createCodeTools } from "../src/code-tools.ts";
 import { Trace } from "../src/trace.ts";
 import { Gate } from "../src/inference.ts";
 import { runTask, restoreConversation, validateMessages } from "../src/runtime.ts";
@@ -20,6 +26,21 @@ import { createGame } from "../src/game.ts";
 import { loadExperiment } from "../src/config.ts";
 import { setTimeout as delay } from "node:timers/promises";
 const key = { runId: "r", worldId: "w", agentId: "a" };
+test("a saved skill can be revised and called with data on the same character", async t => {
+  const { store, game, trace } = await setup(t);
+  let code = "";
+  game.executeCode = async source => { code = source; return {}; };
+  const tools = createCodeTools(key, game, store, trace);
+  const call = (name: string, args: object) => tools.find(t => t.name === name)!.execute("id", args);
+  await call("save_skill", { name: "probe", description: "first", code: "return 1;" });
+  await call("save_skill", { name: "probe", description: "inspect holdings", code: "return input;" });
+  assert.equal(store.savedSkills(key).length, 1);
+  assert.deepEqual(store.savedSkills({ ...key, agentId: "b" }), []);
+  const arg = { item: "logs\n'\`" };
+  await call("execute_code", { skill: "probe", input: arg });
+  assert.deepEqual(new Function(code)(), arg);
+  assert.equal(store.savedSkills(key, "probe")[0].description, "inspect holdings");
+});
 const model: Model<Api> = {
   id: "script",
   name: "script",
@@ -29,12 +50,12 @@ const model: Model<Api> = {
   reasoning: false,
   input: ["text"],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 65536,
+  contextWindow: 1048576,
   maxTokens: 2048,
 };
 function response(
   content: AssistantMessage["content"],
-  stopReason: "stop" | "toolUse" = "stop",
+  stopReason: "stop" | "toolUse" | "length" = "stop",
 ) {
   const stream = createAssistantMessageEventStream();
   const message: AssistantMessage = {
@@ -108,6 +129,25 @@ async function setup(t: any) {
     limits,
   };
 }
+test("provider truncation stops the agent and settles usage", async (t) => {
+  const deps = await setup(t);
+  let calls = 0;
+  const provider = {
+    model: { ...model, contextWindow: 4096, cost: { ...model.cost, input: 1 } },
+    upperUsd: 0.01,
+    capUsd: 1,
+    stream: () => {
+      calls++;
+      return response([{ type: "text", text: "I" }], "length");
+    },
+  };
+  const truncated = await runTask({ ...deps, provider }, new AbortController().signal);
+  assert.equal(truncated.status, "context_exhausted", truncated.reason);
+  assert.equal(calls, 1);
+  assert.equal(truncated.tools, 0);
+  assert.equal(deps.store.spending(), 0.000001);
+});
+
 test("real Pi follow-up sees changed memory and one fresh tableau; saved Context equals dispatch", async (t) => {
   const deps = await setup(t);
   const sent: Context[] = [];
@@ -229,6 +269,8 @@ test("Pi SDK baseline preserves large code, results and complete conversation co
       "execute_code",
       "read_memory",
       "read_reference",
+      "read_skills",
+      "save_skill",
       "search_reference",
       "update_memory",
     ]);
@@ -463,4 +505,80 @@ test("explicit cancellation stops a stalled context hook and releases admission"
   (
     await gate.acquire(key, "after-hook", 0, 0, new AbortController().signal)
   ).finish(0);
+});
+
+test("billion-context folds history on the provider wire across tasks and isolates agents", async (t) => {
+  const deps = await setup(t);
+  const bodies: any[] = [];
+  const upstream = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    bodies.push(JSON.parse(Buffer.concat(chunks).toString()));
+    const remember = bodies.length === 1;
+    const fold = bodies.length === 2;
+    if (remember) deps.raw.player.worldX = 3219;
+    const delta = remember || fold ? { tool_calls: [{ index: 0, id: remember ? "call_note" : "call_fold", type: "function",
+      function: remember ? { name: "update_memory", arguments: JSON.stringify({ expectedRevision: 0,
+        value: { plan: ["Sell the logs"], beliefs: [], relationships: {}, nextAction: "Visit the shop" } }) }
+        : { name: "compress", arguments: JSON.stringify({ content: "m00002–m00017 Old trades\nThe agent sold eight batches of logs for coins and recorded each completed transaction in its trading notes." }) },
+    }] } : { content: "done" };
+    const chunk = { id: "fake", object: "chat.completion.chunk", model: "local-test",
+      choices: [{ index: 0, delta, finish_reason: remember || fold ? "tool_calls" : "stop" }],
+      usage: { prompt_tokens: 10000, completion_tokens: 12, total_tokens: 10012 } };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end("data: " + JSON.stringify(chunk) + "\n\ndata: [DONE]\n\n");
+  });
+  upstream.listen(0, "127.0.0.1");
+  try { await once(upstream, "listening"); }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EPERM") return t.skip("sandbox denies loopback listeners");
+    throw e;
+  }
+  const address = upstream.address();
+  assert.ok(address && typeof address === "object");
+  const cancel = new AbortController();
+  let service = await startBillionContext(deps.dir, cancel.signal);
+  const keyEnv = "SWARM_BILI_MOCK_KEY";
+  const prev = process.env[keyEnv];
+  process.env[keyEnv] = "fake-local";
+  try {
+    const provider = createProvider({ provider: "openai-compatible", baseUrl: `http://127.0.0.1:${address.port}/v1`, apiKeyEnv: keyEnv,
+      modelId: "local-test", contextWindow: 1048576, rates: model.cost, costLimitUsd: 0, zeroCost: true });
+    const run = (agentId: string) => {
+      const identity = { ...key, agentId };
+      return runTask({ ...deps, key: identity, definition: runebench, provider, compression: service.agent(identity, provider.model) }, cancel.signal);
+    };
+    for (let i = 0; i < 25; i++) {
+      const message = { role: "user", content: `TRADE_${i}_DETAIL ` + "logs changed hands. ".repeat(60), timestamp: Date.now() };
+      deps.store.append(key, { type: "message_end", data: { message } });
+      deps.store.append(key, { type: "message_end", data: json({ message: await response([{ type: "text", text: "Recorded trade." }]).result() }) });
+    }
+    const first = await run("a");
+    assert.equal(first.status, "completed", first.reason);
+    assert.equal(first.tools, 2);
+    assert.equal(first.requests, 3);
+    const messages = (n: number) => JSON.stringify(bodies[n].messages);
+    assert.match(messages(0), /TRADE_2_DETAIL/);
+    const prefix = bodies[0].messages.slice(0, -1);
+    assert.match(JSON.stringify(prefix), /TRADE_24_DETAIL/);
+    assert.deepEqual(bodies[1].messages.slice(0, prefix.length), prefix);
+    assert.match(bodies[1].messages.at(-1).content, /Latest character observation:.*3219/s);
+    assert.match(bodies[1].messages.at(-1).content, /Private notes:.*Sell the logs/);
+    assert.equal(messages(1).split("Latest character observation:").length - 1, 1);
+    assert.match(messages(2), /The agent sold eight batches/);
+    assert.ok(!messages(2).includes("TRADE_2_DETAIL"), JSON.stringify(bodies[2].messages.slice(-3)).slice(-2500));
+    await service.close();
+    service = await startBillionContext(deps.dir, cancel.signal);
+    assert.equal((await run("a")).status, "completed");
+    assert.doesNotMatch(messages(3), /TRADE_2_DETAIL/);
+    assert.equal((await run("b")).status, "completed");
+    assert.doesNotMatch(messages(4), /sold eight batches|TRADE_2_DETAIL|Sell the logs/);
+    assert.equal(bodies.length, 5);
+    assert.ok(bodies.every(b => !("max_tokens" in b) && !("max_completion_tokens" in b)));
+  } finally {
+    if (prev === undefined) delete process.env[keyEnv]; else process.env[keyEnv] = prev;
+    await service.close();
+    upstream.closeAllConnections();
+    await new Promise<void>(resolve => upstream.close(() => resolve()));
+  }
 });

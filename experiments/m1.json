@@ -12,7 +12,6 @@
   "healthyDelayMs": 1000,
   "failureDelayMs": 5000,
   "limits": {
-    "outputTokens": 2048,
     "freshnessMs": 3000,
     "artifactBytes": 1073741824
   },

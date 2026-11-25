@@ -29,7 +29,7 @@ test("SDK baseline carries instructions and private notes, without injecting the
   const messages = await runebench.buildContext({
     view: {
       stamp: { sessionEpoch: "a", observationSeq: 1, observedAt: 1 },
-      domains: { nearby: "RAW_WORLD_SENTINEL" },
+      domains: [], observation: "# Overview",
       derived: {},
     },
     memory: {

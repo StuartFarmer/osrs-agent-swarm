@@ -1,17 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { identifier, loadProfile } from "./config.ts";
 import type { Experiment, Profile, AgentEntry, AgentKey } from "./types.ts";
 import { Store } from "./store.ts";
 import { Trace } from "./trace.ts";
 import { Gate, createProvider } from "./inference.ts";
+import { startBillionContext } from "./billion-context.ts";
 import { connectGame } from "./game.ts";
 import type { GameClient } from "./game.ts";
 import { attachBrowser, accountsFor } from "./browser.ts";
-import { attachLite } from "./lite.ts";
+import { population, entriesFor, replaceDeaths } from "./evolution.ts";
+import { startLite, attachLite } from "./lite.ts";
 import type { BrowserHandle } from "./browser.ts";
 import {
   readWorld,
@@ -19,7 +21,10 @@ import {
   SDK_REVISION,
   acquireWorldLock,
   worldStats,
+  worldWealth,
 } from "./world.ts";
+import { wealthGini, type WealthSnapshot } from "./liquidation.ts";
+import { osrsValue, runPrices, type FrozenPrices } from "./osrs-prices.ts";
 import { runTask } from "./runtime.ts";
 import { json } from "./agent-definition.ts";
 import { merchant } from "../agents/merchant.ts";
@@ -28,6 +33,7 @@ import type { RecordingResult } from "./recording.ts";
 import { gatherer } from "../agents/gatherer.ts";
 import { runebench } from "../agents/runebench.ts";
 import { connectCodeGame } from "./code-worker.ts";
+import { refreshKeyBalance, type KeyBalance } from "./openrouter-budget.ts";
 export const definitions = { merchant, gatherer, runebench };
 export type RunManifest = {
   runId: string;
@@ -40,12 +46,26 @@ export type RunManifest = {
   configHash: string;
   mode: "live";
   worldEpoch?: string;
+  endowmentHash?: string;
+  initialWealth?: Record<string, number>;
+  initialOsrsValue?: Record<string, number>;
 };
 export type RunReport = {
   runId: string;
   status: "completed" | "incomplete";
   elapsedSeconds: number;
   spendingUsd: number;
+  stopReason?: "budget_exhausted" | "key_limit";
+  openRouterBalance?: KeyBalance;
+  economy?: {
+    venue: "local GE";
+    tick: number | null;
+    gini: number | null;
+    agents: Record<string, { start: number | null; end: number | null; gain: number | null;
+      osrs?: { valuation: ReturnType<typeof osrsValue>; gain: number | null } }>;
+    osrsPriceError?: string;
+    error?: string;
+  };
   failureReason?: string;
   worldTiming?: {
     configuredTickMs: number;
@@ -88,9 +108,10 @@ export async function waitForReady(
 }
 export function runDeadline(
   saved: { startedAt: number | null; deadline: number | null },
-  durationSeconds: number,
+  durationSeconds: number | null,
   now: number,
-): number {
+): number | null {
+  if (durationSeconds === null) return null;
   return saved.deadline ?? now + durationSeconds * 1000;
 }
 export async function reloadProfile(
@@ -171,6 +192,13 @@ export function summarizeAgent(
     after = events.at(-1)!.seq;
   }
 }
+export async function completedBudgetReport(dir: string): Promise<RunReport | undefined> {
+  try {
+    const report: RunReport = JSON.parse(await readFile(join(dir, "report.json"), "utf8"));
+    if (report.runId !== basename(dir)) throw new Error("Saved report belongs to another run");
+    if (report.status === "completed" && (report.stopReason === "budget_exhausted" || report.stopReason === "key_limit")) return report;
+  } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+}
 export async function startRun(
   experiment: Experiment,
   options: {
@@ -187,6 +215,8 @@ export async function startRun(
     );
   verifyRuntime();
   const headless = experiment.clientMode === "headless";
+  if (experiment.durationSeconds === null && (!headless || experiment.model.provider !== "openrouter" || experiment.model.zeroCost))
+    throw new Error("A budget-only run requires a paid headless OpenRouter experiment");
   if (headless && options.record)
     throw new Error(
       "Headless clients cannot record game canvases; use the spectator feed",
@@ -203,10 +233,7 @@ export async function startRun(
     throw new Error(
       "world endpoint or timing mismatch; start the world with the experiment tick rate",
     );
-  const provider = createProvider(
-    experiment.model,
-    experiment.limits.outputTokens,
-  );
+  const provider = createProvider(experiment.model);
   const release = await acquireWorldLock(world.dir),
     controller = new AbortController();
   const outer = options.signal ?? new AbortController().signal;
@@ -224,6 +251,8 @@ export async function startRun(
   const games = new Map<string, GameClient>();
   let recording: Promise<void> | undefined;
   let monitoring: Promise<void> | undefined;
+  let billingMonitor: Promise<void> | undefined;
+  let compression: Awaited<ReturnType<typeof startBillionContext>> | undefined;
   let timingStart: { tick: number; wall: number } | undefined;
   let releaseRecording: (() => Promise<void>) | undefined;
   try {
@@ -261,8 +290,13 @@ export async function startRun(
     const trace = new Trace(dir, store, experiment.limits.artifactBytes, [
       process.env[experiment.model.apiKeyEnv] ?? "",
     ]);
-    const gate = new Gate(experiment.concurrency, store),
-      accounts = await accountsFor(world, experiment.agents);
+    const providerBudget = experiment.durationSeconds === null;
+    const gate = new Gate(experiment.concurrency, store, providerBudget);
+    const limited = new Set<string>();
+    let lives = population(experiment.agents, experiment.permadeath ? store : undefined);
+    let entries = entriesFor(experiment, lives);
+    let accounts = await accountsFor(world, entries);
+    await writeJson(join(world.dir, "scoreboard-run.json"), { runId });
     const report: RunReport = {
       runId,
       status: "incomplete",
@@ -270,17 +304,57 @@ export async function startRun(
       spendingUsd: store.spending(),
       agents: {},
     };
-    for (const a of experiment.agents)
-      report.agents[a.id] = summarizeAgent(store, {
+    const prior = store.db.prepare("SELECT DISTINCT json_extract(scope,'$[2]') AS id FROM events").all();
+    for (const id of new Set([...prior.map(row => String(row.id)), ...entries.map(a => a.id)]))
+      report.agents[id] = summarizeAgent(store, {
         runId,
         worldId: world.id,
-        agentId: a.id,
+        agentId: id,
       });
     const key = (id: string): AgentKey => ({
       runId,
       worldId: world.id,
       agentId: id,
     });
+    let prices: FrozenPrices | undefined;
+    const sampleWealth = async (phase: "start" | "sample" | "end") => {
+      let snapshot: WealthSnapshot | undefined, error: string | undefined;
+      try {
+        snapshot = await worldWealth(world.dir);
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+      }
+      if (phase === "start") manifest.initialWealth = {};
+      const agents: NonNullable<RunReport["economy"]>["agents"] = {};
+      const values: number[] = [];
+      const frame = randomUUID();
+      for (const { agentId, username, displayName } of accounts) {
+        const position = snapshot?.players[username];
+        const retired = Boolean(snapshot?.deaths?.[username]);
+        if (position) {
+          if (!retired) values.push(position.wealth);
+          if (phase === "start") manifest.initialWealth![agentId] = position.wealth;
+        }
+        const start = manifest.initialWealth?.[agentId] ?? null;
+        const end = position?.wealth ?? null;
+        agents[agentId] = { start, end, gain: start !== null && end !== null ? end - start : null };
+        if (prices) {
+          const valuation = position ? osrsValue(position.cash, position.assets, prices) : null;
+          if (phase === "start" && valuation?.total != null)
+            (manifest.initialOsrsValue ??= {})[agentId] = valuation.total;
+          const base = manifest.initialOsrsValue?.[agentId];
+          agents[agentId].osrs = { valuation, gain: base != null && valuation?.total != null ? valuation.total - base : null };
+        }
+        store!.append(key(agentId), { type: "local_ge_wealth", data: json({
+          phase, frame, username, displayName, retired, tick: snapshot?.tick ?? null, position: position ?? null,
+          error: error ?? (position ? null : "Player unavailable"),
+        }) });
+      }
+      report.economy = { venue: "local GE", tick: snapshot?.tick ?? null,
+        gini: values.length === accounts.length ? wealthGini(values) : null, agents,
+        ...(prices?.error ? { osrsPriceError: prices.error } : {}), ...(error ? { error } : {}) };
+      return snapshot;
+    };
     if (manifest.deadline !== null && Date.now() >= manifest.deadline) {
       if (headless) {
         try {
@@ -301,38 +375,58 @@ export async function startRun(
       await writeJson(join(dir, "report.json"), report);
       return report;
     }
+    const refresh = (s: AbortSignal) => refreshKeyBalance(store!, process.env[experiment.model!.apiKeyEnv]!,
+      experiment.model!.costLimitUsd, s);
+    if (providerBudget) {
+      if (options.resumeRunId) {
+        const previous = await completedBudgetReport(dir);
+        if (previous) return previous;
+      }
+      report.openRouterBalance = await refresh(signal);
+      report.spendingUsd = report.openRouterBalance.spentUsd;
+      if (report.openRouterBalance.remainingUsd <= 0) {
+        report.stopReason = "budget_exhausted";
+        report.status = "completed";
+        report.elapsedSeconds = manifest.startedAt ? (Date.now() - manifest.startedAt) / 1000 : 0;
+        await writeJson(join(dir, "report.json"), report);
+        return report;
+      }
+    }
+    compression = await startBillionContext(dir, signal);
+    const contextService = compression;
     clients = headless
-      ? await attachLite(world, accounts)
+      ? experiment.permadeath && options.resumeRunId
+        ? await startLite(world, accounts, signal, true)
+        : await attachLite(world, accounts)
       : (browser = await attachBrowser(world, accounts));
     const prep = AbortSignal.any([
       signal,
       AbortSignal.timeout(experiment.preparationSeconds * 1000),
     ]);
-    const connected = await Promise.allSettled(
-      accounts.map(async (account) => {
-        const scripted =
-          experiment.agents.find((a) => a.id === account.agentId)!
-            .definition === "runebench";
-        const game = scripted
-          ? await connectCodeGame(
-              key(account.agentId),
-              account,
-              world,
-              experiment.limits.freshnessMs,
-              prep,
-              root,
-            )
-          : await connectGame(
-              key(account.agentId),
-              account,
-              world,
-              experiment.limits.freshnessMs,
-            );
-        games.set(account.agentId, game);
-        await game.ready(prep);
-        if (!manifest.startedAt) await game.prepare?.(prep);
-      }),
-    );
+    const connectAccount = async (account: (typeof accounts)[number], prep: AbortSignal) => {
+      const scripted =
+        entries.find((a) => a.id === account.agentId)!
+          .definition === "runebench";
+      const game = scripted
+        ? await connectCodeGame(
+            key(account.agentId),
+            account,
+            world,
+            experiment.limits.freshnessMs,
+            prep,
+            root,
+          )
+        : await connectGame(
+            key(account.agentId),
+            account,
+            world,
+            experiment.limits.freshnessMs,
+          );
+      games.set(account.agentId, game);
+      await game.ready(prep);
+      if (!manifest.startedAt || (experiment.permadeath && !(account.agentId in (manifest.initialWealth ?? {})))) await game.prepare?.(prep);
+    };
+    const connected = await Promise.allSettled(accounts.map(account => connectAccount(account, prep)));
     const failed = connected.find((r) => r.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
     await waitForReady(
@@ -354,25 +448,32 @@ export async function startRun(
         }),
       });
     }
+    if (headless && experiment.agents.some(a => a.definition === "runebench"))
+      prices = await runPrices(dir, manifest.startedAt !== null);
+    const initialState = (id: string, g: GameClient) => {
+      const o = g.observe();
+      const values = {
+        inventory: o.raw.inventory
+          .map((x) => ({ id: x.id, count: x.count }))
+          .sort((a, b) => a.id - b.id),
+        equipment: o.raw.equipment
+          .map((x) => ({ id: x.id, count: x.count }))
+          .sort((a, b) => a.id - b.id),
+        skills: o.raw.skills,
+      };
+      store!.append(key(id), { type: "initial_state", data: json(o) });
+      return hash(JSON.stringify(values));
+    };
     if (!manifest.startedAt) {
-      const baselines = [...games].map(([id, g]) => {
-        const o = g.observe();
-        const values = {
-          inventory: o.raw.inventory
-            .map((x) => ({ id: x.id, count: x.count }))
-            .sort((a, b) => a.id - b.id),
-          equipment: o.raw.equipment
-            .map((x) => ({ id: x.id, count: x.count }))
-            .sort((a, b) => a.id - b.id),
-          skills: o.raw.skills,
-        };
-        store!.append(key(id), { type: "initial_state", data: json(o) });
-        return hash(JSON.stringify(values));
-      });
+      const baselines = [...games].map(([id, game]) => initialState(id, game));
       if (new Set(baselines).size !== 1)
         throw new Error(
           "initial skills/equipment/inventory differ across agents",
         );
+      manifest.endowmentHash = baselines[0];
+      const start = await sampleWealth("start");
+      if (experiment.permadeath && (!start?.deaths || Object.keys(manifest.initialWealth!).length !== accounts.length))
+        throw new Error("Evolution requires engine death tracking and complete founder valuations");
       manifest.startedAt = Date.now();
       manifest.deadline = runDeadline(
         manifest,
@@ -382,7 +483,7 @@ export async function startRun(
       trace.check(65536);
       await writeJson(join(dir, "manifest.json"), manifest);
     }
-    deadlineTimer = setTimeout(
+    if (manifest.deadline !== null) deadlineTimer = setTimeout(
       () => controller.abort(new Error("run deadline")),
       Math.max(0, manifest.deadline! - Date.now()),
     );
@@ -418,7 +519,27 @@ export async function startRun(
           );
         });
     }
-    if (headless && clients.lost)
+    if (providerBudget) billingMonitor = (async () => {
+      try {
+        while (!signal.aborted) {
+          await delay(5000, undefined, { signal });
+          const balance = await refresh(signal);
+          if (balance.spentUsd !== report.openRouterBalance?.spentUsd)
+            console.error(`[billing] OpenRouter charged $${balance.spentUsd} of $${balance.limitUsd}`);
+          report.openRouterBalance = balance;
+          if (balance.remainingUsd <= 0) {
+            report.stopReason = "budget_exhausted";
+            controller.abort();
+          }
+        }
+      } catch (e) {
+        if (!signal.aborted) {
+          report.failureReason = String(e);
+          controller.abort(e);
+        }
+      }
+    })();
+    if (!experiment.permadeath && headless && clients.lost)
       monitoring = (async () => {
         try {
           while (!signal.aborted) {
@@ -434,6 +555,7 @@ export async function startRun(
                 `Headless session lost: ${lost}; reconcile before resuming`,
               );
             }
+            if (!signal.aborted) await sampleWealth("sample");
           }
         } catch (error) {
           if (!signal.aborted) {
@@ -443,7 +565,9 @@ export async function startRun(
           }
         }
       })();
-    const tasks = experiment.agents.map(async (a) => {
+    const runLife = async (a: AgentEntry, signal: AbortSignal) => {
+      const life = lives.find(l => l.id === a.id)!;
+      const agentContext = contextService.agent(key(a.id), provider.model);
       let profile = (await reloadProfile(root, a)).profile;
       const moduleHash = hash(
         await readFile(join(root, "agents", a.definition + ".ts"), "utf8"),
@@ -503,13 +627,19 @@ export async function startRun(
               trace,
               gate,
               provider,
+              compression: agentContext,
+              permadeath: experiment.permadeath,
+              providerBudget,
               definition: definitions[a.definition],
-              profile,
+              profile: experiment.permadeath ? { ...profile, instructions: profile.instructions +
+                "\nDeath permanently ends this life. Your current local liquidation wealth determines your chance of becoming a parent. Save reusable routines and use save_lesson for general knowledge you can pass to descendants." +
+                (life.lessons.length ? "\nInherited lessons: " + JSON.stringify(life.lessons) : "") } : profile,
               limits: experiment.limits,
             },
             signal,
           );
         } catch (e) {
+          if (signal.aborted) break;
           controller.abort(e);
           throw e;
         }
@@ -518,8 +648,21 @@ export async function startRun(
         stats.requests += result.requests;
         stats.tools += result.tools;
         stats.reason = result.reason;
+        if (result.status === "key_limit") {
+          limited.add(a.id);
+          break;
+        }
+        if (result.status === "funding_failed") {
+          report.failureReason = result.reason;
+          controller.abort(new Error(result.reason));
+          break;
+        }
         if (result.status !== "completed") {
           stats.failures++;
+          if (result.status === "context_exhausted" || result.status === "compression_failed") {
+            report.failureReason ??= `${a.id}: ${result.reason}`;
+            break;
+          }
           try {
             if (!browser) throw new Error("Headless mode has no game canvas");
             const png = await browser.capture(a.id);
@@ -541,10 +684,83 @@ export async function startRun(
             { signal },
           ).catch(() => {});
       }
-    });
-    const settled = await Promise.allSettled(tasks);
+    };
+    const jobs = new Map<string, { stop: AbortController; done: Promise<void>; finished: boolean }>();
+    const launch = (entry: AgentEntry) => {
+      const stop = new AbortController();
+      const job = { stop, done: Promise.resolve(), finished: false };
+      jobs.set(entry.id, job);
+      job.done = runLife(entry, AbortSignal.any([signal, stop.signal])).catch(error => {
+        report.failureReason ??= String(error);
+        controller.abort(error);
+      }).finally(() => { job.finished = true; });
+    };
+    if (experiment.permadeath) {
+      try {
+        while (!signal.aborted) {
+          const snapshot = await sampleWealth("sample");
+          if (!snapshot) throw new Error("Unable to value the living population");
+          const children = replaceDeaths(store, key, lives, accounts, snapshot, manifest.startedAt!);
+          if (children.length) {
+            const replacing = new Set(children.map(c => c.slot));
+            const retired = lives.filter(l => replacing.has(l.slot));
+            for (const old of retired) jobs.get(old.id)?.stop.abort(new Error("Character died"));
+            for (const old of retired) {
+              const job = jobs.get(old.id);
+              await job?.done;
+              jobs.delete(old.id);
+              await games.get(old.id)?.close();
+              games.delete(old.id);
+              report.agents[old.id].reason = "Character died";
+              await trace.flush(key(old.id));
+            }
+            lives = population(experiment.agents, store);
+            entries = entriesFor(experiment, lives);
+            accounts = await accountsFor(world, entries);
+            clients = await startLite(world, accounts, signal, true);
+            const prep = AbortSignal.any([signal, AbortSignal.timeout(experiment.preparationSeconds * 1000)]);
+            const connected = await Promise.allSettled(children.map(async child => {
+              report.agents[child.id] = summarizeAgent(store!, key(child.id));
+              await connectAccount(accounts.find(a => a.agentId === child.id)!, prep);
+            }));
+            const failed = connected.find(r => r.status === "rejected");
+            if (failed?.status === "rejected") throw failed.reason;
+          }
+          const newborns = accounts.filter(a => !(a.agentId in manifest.initialWealth!));
+          if (newborns.length) {
+            const initial = await worldWealth(world.dir);
+            for (const a of newborns) {
+              const position = initial.players[a.username];
+              if (!position || initialState(a.agentId, games.get(a.agentId)!) !== manifest.endowmentHash)
+                throw new Error("Newborn endowment differs from founders: " + a.agentId);
+              manifest.initialWealth![a.agentId] = position.wealth;
+              if (prices) {
+                const value = osrsValue(position.cash, position.assets, prices)?.total;
+                if (value != null) (manifest.initialOsrsValue ??= {})[a.agentId] = value;
+              }
+              store.append(key(a.agentId), { type: "endowment", data: json({
+                phase: "birth", username: a.username, tick: initial.tick, position, retired: false
+              }) });
+            }
+            await writeJson(join(dir, "manifest.json"), manifest);
+            await sampleWealth("sample");
+          }
+          const lost = await clients.lost?.();
+          if (lost) throw new Error("Headless session lost: " + lost);
+          for (const entry of entries) if (!jobs.has(entry.id)) launch(entry);
+          if ([...jobs.values()].every(j => j.finished)) break;
+          await delay(5000, undefined, { signal });
+        }
+      } catch (error) {
+        if (!signal.aborted) report.failureReason = error instanceof Error ? error.message : String(error);
+      } finally { controller.abort(); }
+    } else {
+      entries.forEach(launch);
+    }
+    const settled = await Promise.allSettled([...jobs.values()].map(j => j.done));
     controller.abort();
     await monitoring;
+    await sampleWealth("end");
     await recording;
     report.elapsedSeconds = (Date.now() - manifest.startedAt!) / 1000;
     if (headless) {
@@ -579,20 +795,28 @@ export async function startRun(
       }
     }
 
+    if (providerBudget) {
+      await billingMonitor;
+      try {
+        report.openRouterBalance = await refresh(AbortSignal.timeout(30000));
+        if (report.openRouterBalance.remainingUsd <= 0) report.stopReason = "budget_exhausted";
+        else if (entries.every(a => limited.has(a.id))) report.stopReason = "key_limit";
+      } catch (e) { report.failureReason ??= "Final OpenRouter balance unavailable: " + String(e); }
+    }
     report.spendingUsd = store.spending();
     report.status =
       !report.failureReason &&
-      Date.now() >= manifest.deadline! &&
+      (providerBudget ? !!report.stopReason : Date.now() >= manifest.deadline!) &&
       settled.every((r) => r.status === "fulfilled") &&
       report.recording?.status !== "failed"
         ? "completed"
         : "incomplete";
-    for (const a of experiment.agents) {
-      store.append(key(a.id), {
+    for (const id of Object.keys(report.agents)) {
+      store.append(key(id), {
         type: "run_stopped",
         data: { status: report.status, elapsedSeconds: report.elapsedSeconds },
       });
-      await trace.flush(key(a.id));
+      await trace.flush(key(id));
     }
     trace.check(65536);
     await writeJson(join(dir, "report.json"), report);
@@ -601,7 +825,9 @@ export async function startRun(
     if (deadlineTimer) clearTimeout(deadlineTimer);
     controller.abort();
     await monitoring;
+    await billingMonitor;
     await recording;
+    await compression?.close();
     await releaseRecording?.();
     await Promise.allSettled([...games.values()].map((g) => g.close()));
     await clients?.close();

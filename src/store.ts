@@ -1,3 +1,4 @@
+import type { KeyBalance } from "./openrouter-budget.ts";
 import { DatabaseSync } from "node:sqlite";
 import { object, identifier, number } from "./config.ts";
 import type {
@@ -58,7 +59,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS memory(scope TEXT PRIMARY KEY, revision INTEGER NOT NULL, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, value TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_scope ON events(scope,seq);
+      CREATE INDEX IF NOT EXISTS events_observer ON events(json_extract(value,'$.type'),seq);
       CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,intent TEXT NOT NULL,outcome TEXT);
+      CREATE TABLE IF NOT EXISTS openrouter_balance(singleton INTEGER PRIMARY KEY CHECK(singleton=1), fingerprint TEXT NOT NULL, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,scope TEXT NOT NULL,reserved REAL NOT NULL,actual REAL); `);
   }
   private transaction<T>(bytes: number, work: () => T): T {
@@ -93,6 +96,11 @@ export class Store {
       this.event(key, event),
     );
   }
+  appendBatch(events: { key: AgentKey; event: EventInput }[]) {
+    this.transaction(Buffer.byteLength(JSON.stringify(events)), () => {
+      for (const { key, event } of events) this.event(key, event);
+    });
+  }
   readMemory(key: AgentKey): MemoryRevision {
     const r = this.db
       .prepare("SELECT revision,value FROM memory WHERE scope=?")
@@ -100,6 +108,17 @@ export class Store {
     return r
       ? { revision: Number(r.revision), value: JSON.parse(r.value as string) }
       : { revision: 0, value: empty() };
+  }
+  savedSkills(key: AgentKey, name?: string) {
+    // The journal sequence identifies the exact version executed and survives resume.
+    const rows = this.db.prepare(`SELECT MAX(seq) AS revision,
+      json_extract(value,'$.data.name') AS name,
+      json_extract(value,'$.data.description') AS description,
+      CASE WHEN ? IS NOT NULL THEN json_extract(value,'$.data.code') END AS code
+      FROM events WHERE scope=? AND json_extract(value,'$.type')='skill_saved'
+      AND (? IS NULL OR json_extract(value,'$.data.name')=?) GROUP BY json_extract(value,'$.data.name')
+      ORDER BY name`).all(name ?? null, scope(key), name ?? null, name ?? null);
+    return rows as unknown as { revision: number; name: string; description: string; code: string | null }[];
   }
   updateMemory(
     key: AgentKey,
@@ -221,7 +240,17 @@ export class Store {
       );
     });
   }
+  saveKeyBalance(fingerprint: string, balance: KeyBalance): void {
+    this.db.prepare("INSERT INTO openrouter_balance VALUES(1,?,?) ON CONFLICT(singleton) DO UPDATE SET value=excluded.value")
+      .run(fingerprint, JSON.stringify(balance));
+  }
+  keyBalance(): { fingerprint: string; value: KeyBalance } | undefined {
+    const row = this.db.prepare("SELECT fingerprint,value FROM openrouter_balance WHERE singleton=1").get();
+    if (row) return { fingerprint: String(row.fingerprint), value: JSON.parse(String(row.value)) };
+  }
   spending(): number {
+    const billing = this.keyBalance();
+    if (billing) return billing.value.spentUsd;
     return Number(
       this.db
         .prepare(

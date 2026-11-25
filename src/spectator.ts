@@ -9,8 +9,10 @@ import { localUrl } from "./config.ts";
 import { readFileSync, createReadStream } from "node:fs";
 import { resolve } from "node:path";
 import { spectatorAgents, spectatorState } from "./spectator-state.ts";
+import { scoreboard } from "./scoreboard.ts";
 import { viewerAsset } from "./viewer-assets.ts";
 
+const wealthPage = readFileSync(new URL("./spectator-wealth.html", import.meta.url));
 const mapPage = readFileSync(new URL("./spectator-map.html", import.meta.url));
 const watchPage = readFileSync(
   new URL("./spectator-watch.html", import.meta.url),
@@ -31,6 +33,7 @@ export function spectatorPath(
   if (url.hash) return null;
   if (url.pathname.startsWith("/viewer/")) return url.pathname;
   if (url.search) return null;
+  if (/^\/spectator\/wealth\/(?:0|[1-9]\d{0,14})$/.test(url.pathname)) return url.pathname;
   if (
     /^\/spectator\/agents(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63})?$/.test(
       url.pathname,
@@ -43,6 +46,7 @@ export function spectatorPath(
       "/mapview",
       "/mapview/",
       "/watch/",
+      "/wealth/",
       "/playerpositions",
       "/worldmap.jag",
       "/client/mapview.js",
@@ -83,6 +87,16 @@ export function startSpectator(
       }
       if (path === "/") {
         res.writeHead(302, { Location: "/watch/" }).end();
+        return;
+      }
+      if (path === "/wealth/") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(wealthPage);
+        return;
+      }
+      if (path.startsWith("/spectator/wealth/")) {
+        if (!world.dir) { res.writeHead(503).end("World unavailable"); return; }
+        const data = await scoreboard(world.dir, Number(path.split("/").at(-1)));
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(data));
         return;
       }
       if (path === "/watch/") {

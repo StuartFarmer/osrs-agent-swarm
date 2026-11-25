@@ -14,7 +14,7 @@ import {
 import type { WorldHandle, OwnedProcess } from "./world.ts";
 import type { AgentEntry } from "./types.ts";
 import { readSessions } from "./lite.ts";
-import { allocateNames, hasCollectedNames } from "./names.ts";
+import { allocateNames, initializeBundledNames, hasCollectedNames } from "./names.ts";
 export type Account = {
   agentId: string;
   username: string;
@@ -93,23 +93,13 @@ export async function accountsFor(
     if (missing.length) {
       if (process.env.SWARM_NAMES_DB && !existsSync(namePool))
         throw new Error("configured name pool does not exist");
-      const usePool = existsSync(namePool) && hasCollectedNames(namePool);
-      if (process.env.SWARM_NAMES_DB && !usePool)
+      if (!process.env.SWARM_NAMES_DB && (!existsSync(namePool) || !hasCollectedNames(namePool))) {
+        namePool = join(world.dir, "bundled-names.sqlite");
+        initializeBundledNames(namePool);
+      }
+      if (process.env.SWARM_NAMES_DB && !hasCollectedNames(namePool))
         throw new Error("configured name pool contains no collected names");
-      const identities = usePool
-        ? allocateNames(namePool, resolve(world.dir), missing, [...usernames])
-        : missing.map((agentId) => {
-            let username: string;
-            do {
-              username = "s" + randomBytes(5).toString("hex");
-            } while (usernames.has(username));
-            usernames.add(username);
-            return { agentId, username };
-          });
-      if (!usePool)
-        console.error(
-          "[names] No collected name pool yet; using synthetic names for new agents.",
-        );
+      const identities = allocateNames(namePool, resolve(world.dir), missing, [...usernames]);
       for (const identity of identities) {
         const account = { ...identity, password: "admin" };
         saved.push(account);

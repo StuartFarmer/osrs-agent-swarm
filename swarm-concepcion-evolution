@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+export SWARM_EXPERIMENT=experiments/concepcion-evolution.json
+export SWARM_RUN_NAME=voyager-evolution-10usd-01
+export SWARM_VIEWER_PORT=6082
+export COMPOSE_PROJECT_NAME=swarm-voyager-evolution-10usd-01
+exec ./swarm "$@"

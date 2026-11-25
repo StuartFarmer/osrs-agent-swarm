@@ -28,7 +28,13 @@ async function accounts(world: StateWorld): Promise<Account[]> {
 
 export async function spectatorAgents(world: StateWorld) {
   try {
-    return (await accounts(world)).map((a) => ({
+    const roster = await accounts(world);
+    let active: Set<string> | undefined;
+    try {
+      const sessions = JSON.parse(await readFile(join(world.dir, "lite.json"), "utf8"));
+      active = new Set(Object.keys(sessions.processes));
+    } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+    return roster.filter(a => !active || active.has(a.agentId)).map((a) => ({
       id: a.agentId,
       name: a.username,
     }));

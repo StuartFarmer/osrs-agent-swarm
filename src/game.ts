@@ -1,3 +1,5 @@
+import { formatObservation } from "./observation.ts";
+import type { BotWorldState } from "../vendor/rs-sdk/sdk/types.ts";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { localUrl } from "./config.ts";
@@ -213,7 +215,7 @@ function validate(a: GameAction, s: RawState): void {
           ? x.index === a.target.index
           : x.x === a.target.x &&
             x.z === a.target.z &&
-            (a.kind === "pickup" || x.level === a.target.level)),
+            (a.kind === "pickup" || (x.level ?? 0) === (a.target.level ?? 0))),
     );
     if (!match) throw new Error("target reference changed");
     if (
@@ -443,6 +445,7 @@ export async function connectGame(
       lastShownMessageTick: -1,
     };
     const manager = { get: () => connection, connect: async () => connection };
+    let previousWorld: { tick: number; revision?: number } | undefined;
     game.executeCode = async (code, timeoutMs, signal, world) => {
       const result = await executeCode(
         manager,
@@ -451,9 +454,17 @@ export async function connectGame(
         timeoutMs,
         signal,
         undefined,
-        { world },
+        { world: "none" },
       );
-      return result.structuredContent;
+      const output = result.structuredContent;
+      const state: BotWorldState | null = sdk.getState();
+      if (world === "none" || !state || ["not_connected", "superseded", "cancelled"].includes(output.error?.kind)) return output;
+      const previous = previousWorld;
+      const reset = !previous || state.tick < previous.tick || (state.revision ?? Infinity) < (previous.revision ?? 0);
+      const fresh = state.gameMessages.filter(m => reset || (m.observationId != null && previous.revision != null
+        ? m.observationId > previous.revision : m.tick > previous.tick));
+      previousWorld = { tick: state.tick, revision: state.revision };
+      return { ...output, world: formatObservation(state, undefined, { nearbyLimit: world === "brief" ? 10 : 50, chat: fresh }), stateAgeMs: sdk.getStateAge() };
     };
   }
   return game;

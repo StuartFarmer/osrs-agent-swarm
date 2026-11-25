@@ -76,6 +76,7 @@ export function createCodeTools(
   game: GameClient,
   store: Store,
   trace: Trace,
+  permadeath = false,
 ): AgentTool[] {
   const tool = (
     name: string,
@@ -104,9 +105,11 @@ export function createCodeTools(
   return [
     tool(
       "execute_code",
-      "Execute TypeScript for YOUR character with sdk, bot, Spells and console available. There is no default script timeout; timeoutSeconds optionally sets one. world=brief or full includes an observation, none omits it. Cancellation or timeout can leave previously sent game actions in progress: inspect before retrying. No bot_name argument is needed.",
+      "Execute inline code or a named private skill for YOUR character with sdk, bot, Spells and console. Pass input to a saved skill. There is no default script timeout; timeoutSeconds optionally sets one. world=brief or full includes an observation, none omits it. Cancellation or timeout can leave previously sent game actions in progress: inspect before retrying.",
       {
-        code: Type.String({ minLength: 1 }),
+        code: Type.Optional(Type.String({ minLength: 1 })),
+        skill: Type.Optional(Type.String({ minLength: 1 })),
+        input: Type.Optional(Type.Unknown()),
         timeoutSeconds: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
         world: Type.Optional(
           Type.Union([
@@ -118,19 +121,28 @@ export function createCodeTools(
       },
       async (args, signal) => {
         if (!game.executeCode) throw new Error("SDK executor not connected");
+        if (!!args.code === !!args.skill || (args.code && "input" in args))
+          throw new Error("Provide either code, or skill with optional input");
+        const skill = args.skill ? store.savedSkills(key, args.skill)[0] : undefined;
+        if (args.skill && !skill) throw new Error("Unknown private skill");
+        const code = skill ? "const input = JSON.parse(" + JSON.stringify(JSON.stringify(args.input ?? null)) + ");\n" + skill.code : args.code;
         trace.check();
         const actionId = randomUUID();
-        store.append(key, { type: "script_started", actionId, data: json(args) });
+        store.append(key, { type: "script_started", actionId, data: json(skill ? { ...args, revision: skill.revision } : args) });
         await trace.flush(key);
         try {
           const result = await game.executeCode(
-            args.code,
+            code,
             args.timeoutSeconds === undefined ? undefined : args.timeoutSeconds * 1000,
             signal,
             args.world ?? "brief",
           );
           store.append(key, { type: "script_result", actionId, data: json(result) });
           await trace.flush(key);
+          if (result && typeof result === "object" && "world" in result && typeof result.world === "string") {
+            const { world, ...execution } = result;
+            return JSON.stringify(execution) + "\n" + world;
+          }
           return JSON.stringify(result);
         } catch (error) {
           store.append(key, {
@@ -165,5 +177,21 @@ export function createCodeTools(
       },
       (a) => searchReference(a.query, a.directory),
     ),
+    ...(permadeath ? [tool("save_lesson", "Save a general gameplay lesson that descendants can inherit. Include when it applies. Keep private relationships and unfinished plans in update_memory.", { lesson: Type.String({ minLength: 1 }) },
+      async ({ lesson }) => {
+        const event = store.append(key, { type: "lesson_saved", data: { lesson } });
+        await trace.flush(key);
+        return JSON.stringify({ revision: event.seq });
+      })] : []),
+    tool("save_skill", "Save or revise a reusable private TypeScript routine. Describe its prerequisites, expected effect and evidence. It runs with sdk, bot and JSON input.",
+      { name: Type.String({ minLength: 1 }), description: Type.String({ minLength: 1 }), code: Type.String({ minLength: 1 }) },
+      async (args) => {
+        const event = store.append(key, { type: "skill_saved", data: json(args) });
+        await trace.flush(key);
+        return JSON.stringify({ name: args.name, revision: event.seq });
+      }),
+    tool("read_skills", "List your private skill descriptions, or read one named routine with its current code.",
+      { name: Type.Optional(Type.String({ minLength: 1 })) },
+      async (args) => JSON.stringify(store.savedSkills(key, args.name))),
   ];
 }

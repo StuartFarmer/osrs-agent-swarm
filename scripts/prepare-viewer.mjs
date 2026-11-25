@@ -1,7 +1,33 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir, copyFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+export function viewerTheme(globalCss, panelCss) {
+  const fonts = globalCss.match(/@font-face\s*\{[^}]*\}/g) ?? [];
+  if (fonts.length !== 2) throw new Error("Pinned viewer font rules changed");
+  function rule(source, selector) {
+    source = "\n" + source;
+    const anchor = "\n" + selector + " {";
+    if (source.split(anchor).length !== 2)
+      throw new Error("Pinned viewer theme rule changed: " + selector);
+    const start = source.indexOf(anchor) + 1;
+    const end = source.indexOf("}", start);
+    if (end < 0) throw new Error("Incomplete viewer theme rule");
+    return ".swarm-shell " + source.slice(start, end + 1);
+  }
+  return [
+    "/* Selected rules from pinned RS World; global layout resets intentionally excluded. */",
+    ...fonts,
+    ...[".rs-border", ".rs-background"].map((s) => rule(globalCss, s)),
+    ...[
+      ".live-button",
+      ".live-button:hover:not(:disabled)",
+      ".live-button:disabled",
+    ].map((s) => rule(panelCss, s)),
+    "",
+  ].join("\n");
+}
 
 export function patchViewer(source) {
   if (source.includes("private swarmSelect")) return source;
@@ -77,4 +103,21 @@ if (
   if (revision !== pin) throw new Error("Viewer revision mismatch");
   const path = join(root, "src/live/LiveController.ts");
   await writeFile(path, patchViewer(await readFile(path, "utf8")));
+  const theme = join(root, "public/swarm-theme");
+  await mkdir(join(theme, "media"), { recursive: true });
+  for (const name of [
+    "RuneScape-Bold-12.ttf",
+    "RuneScape-Plain-11.ttf",
+    "interface-border.png",
+    "interface-bg.png",
+  ])
+    await copyFile(join(root, "src/media", name), join(theme, "media", name));
+  await copyFile(join(root, "LICENSE"), join(theme, "LICENSE.txt"));
+  await writeFile(
+    join(theme, "theme.css"),
+    viewerTheme(
+      await readFile(join(root, "src/index.css"), "utf8"),
+      await readFile(join(root, "src/live/LivePanel.css"), "utf8"),
+    ),
+  );
 }
